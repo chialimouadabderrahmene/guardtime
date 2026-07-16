@@ -1,0 +1,16 @@
+{
+  "name": "guardtime-isp-adapter",
+  "version": "1.0.0",
+  "description": "ISP-grade subscriber policy adapter with simulated RADIUS, DHCP, CGNAT, and BNG enforcement",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js && node --check src/config.js && node --check src/logger.js && node --check src/tenant-store.js && node --check src/radius.service.js && node --check src/dhcp.service.js && node --check src/subscriber-resolver.js && node --check src/bng-controller.js && node --check src/policy-engine.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

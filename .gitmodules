@@ -1,0 +1,6 @@
+[submodule "backend"]
+	path = backend
+	url = https://github.com/sheekaoff-maker/backendparent.git
+[submodule "dns-service"]
+	path = dns-service
+	url = https://github.com/sheekaoff-maker/dns-server.git

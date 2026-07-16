@@ -1,0 +1,19 @@
+[Unit]
+Description=GuardTime Gateway Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/guardtime/gateway-agent
+EnvironmentFile=/opt/guardtime/gateway-agent/.env
+ExecStart=/usr/bin/node /opt/guardtime/gateway-agent/src/main.js
+Restart=always
+RestartSec=3
+
+# iptables needs root/CAP_NET_ADMIN. Keep this service isolated but privileged enough.
+User=root
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target
