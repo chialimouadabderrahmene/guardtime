@@ -1,0 +1,57 @@
+{
+  "generatedAt": "2026-07-17",
+  "scoreOutOf100": 78,
+  "backendCommit": "36c4e4d",
+  "deployedCommit": "f71edfc (pre-throttle-and-jti-fix)",
+  "unitTests": { "suites": 8, "tests": 53, "status": "PASS" },
+  "sections": {
+    "1_dns_throttle": {
+      "status": "FIXED_DEPLOY_PENDING",
+      "evidence": "SkipThrottle now skips default+auth_login+auth_register. Root cause: bare @SkipThrottle() skips only 'default'; auth_login(5/60) applied to every route capping DNS at 5/min. Test dns-policy.throttle.spec rebuilt with the real 3-throttler prod config: 500 DNS calls never throttled; a normal route still throttles. Live PASS requires redeploy of 36c4e4d.",
+      "risk": "Public exposure: /dns/policy/check has no auth and is now unthrottled — restrict it to localhost/trusted network at Nginx (it is called only by the co-located DNS service)."
+    },
+    "2_not_executed": {
+      "expired_session": "PASS (test: calculateRemainingMinutes, time-accelerated)",
+      "scheduler_bedtime": "PASS (test: enforceDeviceSchedules lock+unlock, fake timers)",
+      "scheduler_gaming_expiry": "PARTIAL (remaining-time detection tested; full checkActiveSessions cron path not driven)",
+      "scheduler_cache_cleanup": "NOT_IMPLEMENTED (no cache-cleanup cron exists in the codebase)",
+      "ttl_cache_expiry": "PARTIAL (30s TTL delegated to cache-manager; version-invalidation tested in dns-policy.engine; raw TTL expiry not asserted)"
+    },
+    "3_push": {
+      "status": "PARTIAL",
+      "evidence": "push.service.spec covers register/upsert, send, prune invalid token, no-tokens (offline device), delivery-disabled no-op. FcmSender unconfigured => 'skipped'.",
+      "gap": "No retry logic implemented in PushService — not tested (would be a new feature; out of scope)."
+    },
+    "4_load": {
+      "status": "NOT_EXECUTED",
+      "reason": "100/500/1000-device load needs a local/staging backend (Postgres+Redis). None available on this Windows host and Docker is disallowed; running it against production would DoS + pollute prod. Harness is built and gated behind SIM_ALLOW_HEAVY + non-prod URL."
+    },
+    "5_chaos": {
+      "status": "PARTIAL",
+      "client_side": "PASS (high latency, 100% packet loss handled, unreachable backend handled)",
+      "server_side": "NOT_EXECUTED (crash Redis/DB/backend, PM2 restart need host/SSH access; destructive on prod)"
+    },
+    "6_security": {
+      "replay_attack": "PASS (unit: auth.refresh-replay, real JWT + stateful store; fixed via unique jti + CAS)",
+      "jwt_tampering": "PASS (invalid token -> 401, live + unit)",
+      "expired_jwt": "PARTIAL (invalid-signature -> 401 proven; a genuinely expired token not forged)",
+      "role_escalation": "PASS (register role=ADMIN -> 400; PARENT hits admin route -> 403)",
+      "sql_injection": "PASS (stored as literal, table intact, live)",
+      "nosql_injection": "N/A (PostgreSQL + Prisma parameterized queries)",
+      "massive_dns_spam": "FIXED_DEPLOY_PENDING (throttle exemption above)",
+      "gateway_spoofing": "PASS (invalid x-gateway-token -> 401, live)",
+      "command_replay": "NOT_EXECUTED (no command-ack replay scenario driven)"
+    },
+    "7_regression": {
+      "status": "PASS",
+      "evidence": "53/53 backend tests green; no previously-passing scenario broken."
+    }
+  },
+  "remainingRisks": [
+    "Two critical fixes (unique-jti replay fix, DNS multi-throttler skip) are committed (36c4e4d) but NOT deployed — production is still vulnerable to replay + DNS 429 fail-open until redeploy.",
+    "/dns/policy/check is public + now unthrottled -> restrict to localhost at Nginx.",
+    "auth_login/auth_register throttlers are registered globally in forRoot and apply per-endpoint (5/60 & 10/60) to EVERY route, not just auth — a latent over-throttling of normal endpoints. Auth limiting itself is done via @Throttle on the auth controller, so these named throttlers are effectively spurious. Left unchanged (no-refactor directive) but flagged.",
+    "Load, server-side chaos, real-device, and console verification remain unrun (no local stack / hardware).",
+    "Push retry + cache-cleanup cron are not implemented."
+  ]
+}
