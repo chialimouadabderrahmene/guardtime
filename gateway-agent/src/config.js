@@ -34,7 +34,9 @@ function loadConfig() {
   loadDotEnv();
 
   const config = {
-    backendUrl: (process.env.BACKEND_URL || 'http://localhost:3000').replace(/\/$/, ''),
+    // The gateway agent runs on the customer's router, so it reaches the
+    // backend over the public internet.
+    backendUrl: (process.env.BACKEND_URL || 'https://api.waqti.pro').replace(/\/$/, ''),
     gatewayToken: process.env.GATEWAY_TOKEN || '',
     pollIntervalMs: int('POLL_INTERVAL_MS', 3000),
     dnsRedirectIp: process.env.DNS_REDIRECT_IP || '',
