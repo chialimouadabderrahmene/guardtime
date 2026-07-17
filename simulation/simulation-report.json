@@ -1,24 +1,24 @@
 {
   "meta": {
-    "generatedAt": "2026-07-17T11:36:54.106Z",
+    "generatedAt": "2026-07-17T17:29:08.238Z",
     "baseUrl": "https://api.waqti.pro",
     "isProd": true,
     "apiMetrics": {
-      "requests": 145,
-      "avgMs": 105,
-      "p50Ms": 67,
-      "p95Ms": 289,
-      "maxMs": 1270,
+      "requests": 146,
+      "avgMs": 126,
+      "p50Ms": 83,
+      "p95Ms": 323,
+      "maxMs": 1281,
       "statusCounts": {
         "0": 1,
-        "200": 21,
+        "200": 113,
         "201": 16,
-        "204": 3,
+        "204": 5,
         "400": 1,
-        "401": 6,
+        "401": 7,
         "403": 1,
         "404": 1,
-        "429": 95
+        "429": 1
       },
       "counters": {
         "dnsQueries": 7
@@ -26,12 +26,11 @@
     }
   },
   "counts": {
-    "PASS": 29,
-    "WARN": 3,
-    "NOT_EXECUTED": 6,
-    "FAIL": 1
+    "PASS": 34,
+    "NOT_EXECUTED": 5,
+    "WARN": 1
   },
-  "passRate": 97,
+  "passRate": 100,
   "results": [
     {
       "group": "Auth",
@@ -109,7 +108,7 @@
       "group": "Database",
       "name": "CRUD: create device persists",
       "status": "PASS",
-      "detail": "deviceId 1d19235d",
+      "detail": "deviceId a968d930",
       "evidence": null,
       "error": null
     },
@@ -172,16 +171,16 @@
     {
       "group": "DNS",
       "name": "unlock restores allow (fresh domain)",
-      "status": "WARN",
-      "detail": "throttled (SkipThrottle fix not deployed)",
+      "status": "PASS",
+      "detail": "ALLOW",
       "evidence": null,
       "error": null
     },
     {
       "group": "DNS",
       "name": "strict-mode DoH (dns.google)",
-      "status": "WARN",
-      "detail": "throttled",
+      "status": "PASS",
+      "detail": "BLOCK (strict on)",
       "evidence": null,
       "error": null
     },
@@ -229,7 +228,7 @@
       "group": "Gateway",
       "name": "register + pair",
       "status": "PASS",
-      "detail": "paired token 6bb54d…",
+      "detail": "paired token fcc67e…",
       "evidence": null,
       "error": null
     },
@@ -267,9 +266,17 @@
     },
     {
       "group": "Notifications",
+      "name": "push token register/unregister round trip",
+      "status": "PASS",
+      "detail": "204 / 204",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Notifications",
       "name": "FCM delivery + retries",
-      "status": "NOT_EXECUTED",
-      "detail": "push delivery is credential-gated (no Firebase service account)",
+      "status": "WARN",
+      "detail": "firebaseStatus=undefined — real delivery not configured on this deployment. Token register/unregister proven above; send/multicast/retry/invalid-token/offline-device proven by fcm.sender.spec.ts + push.service.spec.ts (mocked, 18 cases).",
       "evidence": null,
       "error": null
     },
@@ -324,10 +331,10 @@
     {
       "group": "Security",
       "name": "replay attack (reused refresh → 401)",
-      "status": "FAIL",
-      "detail": "first 200 second 200",
+      "status": "PASS",
+      "detail": "200 then 401",
       "evidence": null,
-      "error": "Error: first 200 second 200\n    at Object.assert (C:\\Users\\Origin Systems\\Desktop\\new app jord\\simulation\\lib\\scenario.js:47:20)\n    at C:\\Users\\Origin Systems\\Desktop\\new app jord\\simulation\\scenario-runner\\run.js:273:7\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async Object.scenario (C:\\Users\\Origin Systems\\Desktop\\new app jord\\simulation\\lib\\scenario.js:15:17)\n    at async main (C:\\Users\\Origin Systems\\Desktop\\new app jord\\simulation\\scenario-runner\\run.js:267:3)"
+      "error": null
     },
     {
       "group": "Security",
@@ -340,8 +347,8 @@
     {
       "group": "Security",
       "name": "DNS spam → throttle behaviour (documents fail-open bug)",
-      "status": "WARN",
-      "detail": "30/30 got 429 — DNS endpoint is throttled (SkipThrottle fix not deployed → resolver fails open)",
+      "status": "PASS",
+      "detail": "0/30 throttled — SkipThrottle deployed",
       "evidence": null,
       "error": null
     }
@@ -355,7 +362,7 @@
         "p50Ms": 0,
         "p95Ms": 0,
         "maxMs": 0,
-        "errors": 60,
+        "errors": 0,
         "throughput": 0
       }
     ],
@@ -365,7 +372,7 @@
     {
       "name": "client high latency (+1200ms)",
       "status": "PASS",
-      "detail": "status 200, ~1270ms"
+      "detail": "status 200, ~1282ms"
     },
     {
       "name": "client 100% packet loss (timeout handled)",
@@ -384,9 +391,9 @@
     }
   ],
   "resources": {
-    "rssMB": 63,
-    "heapUsedMB": 12.4,
+    "rssMB": 63.2,
+    "heapUsedMB": 11.7,
     "cpuUserMs": 296,
-    "cpuSystemMs": 93
+    "cpuSystemMs": 140
   }
 }
