@@ -1,0 +1,392 @@
+{
+  "meta": {
+    "generatedAt": "2026-07-17T11:36:54.106Z",
+    "baseUrl": "https://api.waqti.pro",
+    "isProd": true,
+    "apiMetrics": {
+      "requests": 145,
+      "avgMs": 105,
+      "p50Ms": 67,
+      "p95Ms": 289,
+      "maxMs": 1270,
+      "statusCounts": {
+        "0": 1,
+        "200": 21,
+        "201": 16,
+        "204": 3,
+        "400": 1,
+        "401": 6,
+        "403": 1,
+        "404": 1,
+        "429": 95
+      },
+      "counters": {
+        "dnsQueries": 7
+      }
+    }
+  },
+  "counts": {
+    "PASS": 29,
+    "WARN": 3,
+    "NOT_EXECUTED": 6,
+    "FAIL": 1
+  },
+  "passRate": 97,
+  "results": [
+    {
+      "group": "Auth",
+      "name": "register creates PARENT",
+      "status": "PASS",
+      "detail": "role=PARENT",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Auth",
+      "name": "login",
+      "status": "PASS",
+      "detail": "200 + tokens",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Auth",
+      "name": "refresh token",
+      "status": "PASS",
+      "detail": "200 rotated",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Auth",
+      "name": "logout clears session",
+      "status": "PASS",
+      "detail": "logout → refresh 401",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Auth",
+      "name": "invalid token → 401",
+      "status": "PASS",
+      "detail": "401",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Auth",
+      "name": "no token → 401",
+      "status": "PASS",
+      "detail": "401",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Auth",
+      "name": "privilege escalation (role=ADMIN) rejected",
+      "status": "PASS",
+      "detail": "400 rejected",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Auth",
+      "name": "roles: PARENT blocked from admin endpoint (403)",
+      "status": "PASS",
+      "detail": "403",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Database",
+      "name": "CRUD: create+read child persists",
+      "status": "PASS",
+      "detail": "1 children",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Database",
+      "name": "CRUD: create device persists",
+      "status": "PASS",
+      "detail": "deviceId 1d19235d",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Database",
+      "name": "CRUD: update device",
+      "status": "PASS",
+      "detail": "renamed",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Database",
+      "name": "CRUD: IDOR — random device id not accessible",
+      "status": "PASS",
+      "detail": "404",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "DNS",
+      "name": "allow (unknown domain)",
+      "status": "PASS",
+      "detail": "ALLOW",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "DNS",
+      "name": "block (seeded roblox.com)",
+      "status": "PASS",
+      "detail": "BLOCK DOMAIN_BLOCKED",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "DNS",
+      "name": "wildcard/subdomain block",
+      "status": "PASS",
+      "detail": "BLOCK DOMAIN_BLOCKED",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "DNS",
+      "name": "category block (activate GAMING then query)",
+      "status": "PASS",
+      "detail": "BLOCK CATEGORY_BLOCKED",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "DNS",
+      "name": "internet lock blocks a fresh domain",
+      "status": "PASS",
+      "detail": "FULL_INTERNET_LOCK",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "DNS",
+      "name": "unlock restores allow (fresh domain)",
+      "status": "WARN",
+      "detail": "throttled (SkipThrottle fix not deployed)",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "DNS",
+      "name": "strict-mode DoH (dns.google)",
+      "status": "WARN",
+      "detail": "throttled",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "DNS",
+      "name": "ttl expiry (30s)",
+      "status": "NOT_EXECUTED",
+      "detail": "needs a 30s+ wait; covered by unit test dns-policy.engine",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "DNS",
+      "name": "expired session block",
+      "status": "NOT_EXECUTED",
+      "detail": "needs elapsed session time; covered by unit test dns-policy.engine",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Child Device",
+      "name": "heartbeat / health",
+      "status": "PASS",
+      "detail": "health=VERIFIED",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Child Device",
+      "name": "gaming session start/stop",
+      "status": "PASS",
+      "detail": "ACTIVE→stopped",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Child Device",
+      "name": "offline→reconnect (state)",
+      "status": "PASS",
+      "detail": "offline→online",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Gateway",
+      "name": "register + pair",
+      "status": "PASS",
+      "detail": "paired token 6bb54d…",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Gateway",
+      "name": "poll policies (gateway token)",
+      "status": "PASS",
+      "detail": "policies obj",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Gateway",
+      "name": "report discovery (ARP)",
+      "status": "PASS",
+      "detail": "discovery accepted",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Gateway",
+      "name": "invalid gateway token → 401",
+      "status": "PASS",
+      "detail": "401",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Notifications",
+      "name": "list endpoint reachable",
+      "status": "PASS",
+      "detail": "0 events",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Notifications",
+      "name": "FCM delivery + retries",
+      "status": "NOT_EXECUTED",
+      "detail": "push delivery is credential-gated (no Firebase service account)",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Reports",
+      "name": "weekly",
+      "status": "PASS",
+      "detail": "label Jul 11 – Jul 17",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Reports",
+      "name": "device-health summary",
+      "status": "PASS",
+      "detail": "1/1 protected",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Scheduler",
+      "name": "bedtime start/end",
+      "status": "NOT_EXECUTED",
+      "detail": "server cron; not observable within a short live run",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Scheduler",
+      "name": "gaming expiry",
+      "status": "NOT_EXECUTED",
+      "detail": "server cron + elapsed time; covered by unit test",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Scheduler",
+      "name": "cache cleanup",
+      "status": "NOT_EXECUTED",
+      "detail": "server cron",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Security",
+      "name": "SQL injection stored as literal",
+      "status": "PASS",
+      "detail": "stored literal, table intact",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Security",
+      "name": "replay attack (reused refresh → 401)",
+      "status": "FAIL",
+      "detail": "first 200 second 200",
+      "evidence": null,
+      "error": "Error: first 200 second 200\n    at Object.assert (C:\\Users\\Origin Systems\\Desktop\\new app jord\\simulation\\lib\\scenario.js:47:20)\n    at C:\\Users\\Origin Systems\\Desktop\\new app jord\\simulation\\scenario-runner\\run.js:273:7\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async Object.scenario (C:\\Users\\Origin Systems\\Desktop\\new app jord\\simulation\\lib\\scenario.js:15:17)\n    at async main (C:\\Users\\Origin Systems\\Desktop\\new app jord\\simulation\\scenario-runner\\run.js:267:3)"
+    },
+    {
+      "group": "Security",
+      "name": "rate limiting active (auth burst → 429)",
+      "status": "PASS",
+      "detail": "429 enforced",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Security",
+      "name": "DNS spam → throttle behaviour (documents fail-open bug)",
+      "status": "WARN",
+      "detail": "30/30 got 429 — DNS endpoint is throttled (SkipThrottle fix not deployed → resolver fails open)",
+      "evidence": null,
+      "error": null
+    }
+  ],
+  "load": {
+    "tiers": [
+      {
+        "devices": 10,
+        "requests": 0,
+        "avgMs": 0,
+        "p50Ms": 0,
+        "p95Ms": 0,
+        "maxMs": 0,
+        "errors": 60,
+        "throughput": 0
+      }
+    ],
+    "note": " NOTE: against production the shared 100/min throttle caps throughput; the numbers reflect prod safety limits, not backend capacity."
+  },
+  "chaos": [
+    {
+      "name": "client high latency (+1200ms)",
+      "status": "PASS",
+      "detail": "status 200, ~1270ms"
+    },
+    {
+      "name": "client 100% packet loss (timeout handled)",
+      "status": "PASS",
+      "detail": "aborted cleanly=true"
+    },
+    {
+      "name": "backend unreachable (client resilience)",
+      "status": "PASS",
+      "detail": "handled without throw, status -1"
+    },
+    {
+      "name": "server-side chaos (crash Redis/DB/backend, PM2 restart)",
+      "status": "NOT_EXECUTED",
+      "detail": "requires host/SSH access to the VPS or a local stack; destructive on production — not run"
+    }
+  ],
+  "resources": {
+    "rssMB": 63,
+    "heapUsedMB": 12.4,
+    "cpuUserMs": 296,
+    "cpuSystemMs": 93
+  }
+}

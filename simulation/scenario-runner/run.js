@@ -1,0 +1,421 @@
+'use strict';
+
+const config = require('../config');
+const { ApiClient } = require('../lib/api');
+const { Metrics, processResources } = require('../lib/metrics');
+const S = require('../lib/scenario');
+const { ChildDevice } = require('../child-simulator/child-device');
+const { GatewaySimulator } = require('../gateway-simulator/gateway');
+const { NetworkSimulator } = require('../network-simulator/network');
+const report = require('../report-generator/report');
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const email = (tag) => `sim.${tag}.${Date.now()}@qa.waqti.pro`;
+const testIp = (i) => `198.51.100.${(i % 250) + 1}`;
+
+const metrics = new Metrics();
+const createdParents = []; // {api} for cleanup
+
+async function registerParent(tag) {
+  const api = new ApiClient({ metrics });
+  const em = email(tag);
+  const { status, data } = await api.post('/auth/register', {
+    email: em,
+    password: config.password,
+    firstName: 'Sim',
+    lastName: tag,
+  });
+  if (status !== 201) throw new Error(`register ${status}: ${JSON.stringify(data)}`);
+  api.token = data.accessToken;
+  api._email = em;
+  api._refresh = data.refreshToken;
+  createdParents.push(api);
+  return api;
+}
+
+// Retry a call once on 429 (the DNS-throttle bug is undeployed on prod, so a
+// paced functional check can still occasionally hit the shared limit).
+async function paced(fn, waitMs = 800) {
+  let out = await fn();
+  if (out && out.status === 429) {
+    await sleep(20000);
+    out = await fn();
+  }
+  await sleep(waitMs);
+  return out;
+}
+
+async function main() {
+  console.log(`\nGuardTime Simulation Lab → ${config.BASE_URL}${config.isProd ? ' (PROD safe-mode)' : ''}\n`);
+
+  // ---------- SETUP ----------
+  const parent = await registerParent('main');
+  const childRes = await parent.post('/children', { name: 'Sim Child', age: 10 });
+  const childId = childRes.data.id;
+
+  // ================= BACKEND / AUTH =================
+  await S.scenario('Auth', 'register creates PARENT', async () => {
+    const api = new ApiClient({ metrics });
+    const r = await api.post('/auth/register', { email: email('r'), password: config.password });
+    createdParents.push(Object.assign(api, { token: r.data.accessToken, _refresh: r.data.refreshToken }));
+    S.assert(r.status === 201 && r.data.role === 'PARENT', `status ${r.status} role ${r.data && r.data.role}`);
+    return { detail: `role=${r.data.role}` };
+  });
+  await S.scenario('Auth', 'login', async () => {
+    const api = new ApiClient({ metrics });
+    const r = await api.post('/auth/login', { email: parent._email, password: config.password });
+    S.assert(r.status === 200 && r.data.accessToken, `status ${r.status}`);
+    parent.token = r.data.accessToken;
+    parent._refresh = r.data.refreshToken;
+    return { detail: '200 + tokens' };
+  });
+  await S.scenario('Auth', 'refresh token', async () => {
+    const api = new ApiClient({ metrics });
+    const r = await api.post('/auth/refresh', { refreshToken: parent._refresh });
+    S.assert(r.status === 200 && r.data.accessToken, `status ${r.status}`);
+    parent.token = r.data.accessToken;
+    parent._refresh = r.data.refreshToken;
+    return { detail: '200 rotated' };
+  });
+  await S.scenario('Auth', 'logout clears session', async () => {
+    // Fresh login → logout → the refresh token must no longer work.
+    const api = new ApiClient({ metrics });
+    const login = await api.post('/auth/login', { email: parent._email, password: config.password });
+    api.token = login.data.accessToken;
+    const lo = await api.post('/auth/logout', {});
+    S.assert(lo.status === 200 || lo.status === 201 || lo.status === 204, `logout ${lo.status}`);
+    const reuse = await new ApiClient({ metrics }).post('/auth/refresh', { refreshToken: login.data.refreshToken });
+    S.assert(reuse.status === 401, `refresh after logout ${reuse.status} (expected 401)`);
+    return { detail: 'logout → refresh 401' };
+  });
+  await S.scenario('Auth', 'invalid token → 401', async () => {
+    const api = new ApiClient({ metrics, token: 'invalid.jwt.token' });
+    const r = await api.get('/children');
+    S.assert(r.status === 401, `status ${r.status}`);
+    return { detail: '401' };
+  });
+  await S.scenario('Auth', 'no token → 401', async () => {
+    const api = new ApiClient({ metrics });
+    const r = await api.get('/children', { auth: false });
+    S.assert(r.status === 401, `status ${r.status}`);
+    return { detail: '401' };
+  });
+  await S.scenario('Auth', 'privilege escalation (role=ADMIN) rejected', async () => {
+    const api = new ApiClient({ metrics });
+    const r = await api.post('/auth/register', { email: email('pe'), password: config.password, role: 'ADMIN' });
+    S.assert(r.status === 400, `status ${r.status} (expected 400 whitelist reject)`);
+    return { detail: '400 rejected' };
+  });
+  await S.scenario('Auth', 'roles: PARENT blocked from admin endpoint (403)', async () => {
+    const r = await parent.get('/admin/domains/unknown');
+    S.assert(r.status === 403, `status ${r.status} (expected 403 ADMIN-only)`);
+    return { detail: '403' };
+  });
+
+  // ================= DATABASE / CRUD / CACHE =================
+  let device;
+  await S.scenario('Database', 'CRUD: create+read child persists', async () => {
+    const list = await parent.get('/children');
+    S.assert(list.status === 200 && list.data.some((c) => c.id === childId), 'child not persisted');
+    return { detail: `${list.data.length} children` };
+  });
+  await S.scenario('Database', 'CRUD: create device persists', async () => {
+    device = new ChildDevice({ api: parent, childId, name: 'Sim PC', type: 'PC', ip: testIp(0), metrics });
+    await device.register();
+    const got = await parent.get(`/devices/${device.deviceId}`);
+    S.assert(got.status === 200 && got.data.id === device.deviceId, 'device not persisted');
+    return { detail: `deviceId ${device.deviceId.slice(0, 8)}` };
+  });
+  await S.scenario('Database', 'CRUD: update device', async () => {
+    const r = await parent.patch(`/devices/${device.deviceId}`, { name: 'Sim PC Renamed' });
+    S.assert(r.status === 200 && r.data.name === 'Sim PC Renamed', `status ${r.status}`);
+    return { detail: 'renamed' };
+  });
+  await S.scenario('Database', 'CRUD: IDOR — random device id not accessible', async () => {
+    const r = await parent.get('/devices/00000000-0000-0000-0000-000000000000');
+    S.assert(r.status === 404 || r.status === 403, `status ${r.status}`);
+    return { detail: `${r.status}` };
+  });
+
+  // ================= DNS =================
+  // Functional DNS queries retry once on 429; a persistent 429 is reported as
+  // WARN (the known SkipThrottle-undeployed bug), never a logic FAIL.
+  const dnsAssert = (r, ok, detail) => {
+    if (r.status === 429) return { status: S.WARN, detail: 'throttled (SkipThrottle fix not deployed)' };
+    S.assert(ok, `action ${r.action} reason ${r.reason} status ${r.status}`);
+    return { detail };
+  };
+  await paced(() => S.scenario('DNS', 'allow (unknown domain)', async () => {
+    const r = await device.dnsQuery(`allow-${Date.now()}.example`, { retryOn429: true });
+    return dnsAssert(r, r.action === 'ALLOW', 'ALLOW');
+  }));
+  await paced(() => S.scenario('DNS', 'block (seeded roblox.com)', async () => {
+    const r = await device.dnsQuery('roblox.com', { retryOn429: true });
+    return dnsAssert(r, r.action === 'BLOCK', `BLOCK ${r.reason}`);
+  }));
+  await paced(() => S.scenario('DNS', 'wildcard/subdomain block', async () => {
+    const r = await device.dnsQuery('cdn.assets.roblox.com', { retryOn429: true });
+    return dnsAssert(r, r.action === 'BLOCK', `BLOCK ${r.reason}`);
+  }));
+  await paced(() => S.scenario('DNS', 'category block (activate GAMING then query)', async () => {
+    await parent.post(`/admin/blocklists/children/${childId}/categories`, { category: 'GAMING', active: true });
+    const r = await device.dnsQuery('fortnite.com', { retryOn429: true });
+    return dnsAssert(r, r.action === 'BLOCK', `BLOCK ${r.reason}`);
+  }));
+  await paced(() => S.scenario('DNS', 'internet lock blocks a fresh domain', async () => {
+    await device.lock();
+    const r = await device.dnsQuery(`locked-${Date.now()}.example`, { retryOn429: true });
+    return dnsAssert(r, r.action === 'BLOCK' && r.reason === 'FULL_INTERNET_LOCK', 'FULL_INTERNET_LOCK');
+  }));
+  await paced(() => S.scenario('DNS', 'unlock restores allow (fresh domain)', async () => {
+    await device.unlock();
+    const r = await device.dnsQuery(`unlocked-${Date.now()}.example`, { retryOn429: true });
+    return dnsAssert(r, r.action === 'ALLOW', 'ALLOW');
+  }));
+  await paced(() => S.scenario('DNS', 'strict-mode DoH (dns.google)', async () => {
+    const r = await device.dnsQuery('dns.google', { retryOn429: true });
+    if (r.status === 429) return { status: S.WARN, detail: 'throttled' };
+    if (r.action === 'BLOCK') return { detail: 'BLOCK (strict on)' };
+    return { status: S.WARN, detail: `ALLOW — STRICT_MODE appears OFF on server` };
+  }));
+  S.markNotExecuted('DNS', 'ttl expiry (30s)', 'needs a 30s+ wait; covered by unit test dns-policy.engine');
+  S.markNotExecuted('DNS', 'expired session block', 'needs elapsed session time; covered by unit test dns-policy.engine');
+
+  // ================= CHILD DEVICE =================
+  await S.scenario('Child Device', 'heartbeat / health', async () => {
+    const hb = await device.heartbeat();
+    S.assert(hb.status === 200, `status ${hb.status}`);
+    return { detail: `health=${hb.health}` };
+  });
+  await S.scenario('Child Device', 'gaming session start/stop', async () => {
+    const s = await device.startSession(60);
+    S.assert(s.status === 201 && s.session.status === 'ACTIVE', `start ${s.status}`);
+    const stop = await device.stopSession(s.session.id);
+    S.assert(stop === 201, `stop ${stop}`);
+    return { detail: 'ACTIVE→stopped' };
+  });
+  await S.scenario('Child Device', 'offline→reconnect (state)', async () => {
+    device.goOffline();
+    const off = device.online;
+    device.reconnect();
+    S.assert(off === false && device.online === true, 'state transition failed');
+    return { detail: 'offline→online' };
+  });
+
+  // ================= GATEWAY =================
+  await S.scenario('Gateway', 'register + pair', async () => {
+    const gw = new GatewaySimulator({ api: new ApiClient({ metrics }), parentApi: parent });
+    await gw.register('Sim-GW');
+    const p = await gw.pair();
+    S.assert(gw.token && (p.status === 200 || p.status === 201), `pair ${p.status}`);
+    global.__gw = gw;
+    return { detail: `paired token ${String(gw.token).slice(0, 6)}…` };
+  });
+  await S.scenario('Gateway', 'poll policies (gateway token)', async () => {
+    const gw = global.__gw;
+    const r = await gw.pollPolicies();
+    S.assert(r.status === 200, `status ${r.status}`);
+    return { detail: `policies ${Array.isArray(r.policies) ? r.policies.length : 'obj'}` };
+  });
+  await S.scenario('Gateway', 'report discovery (ARP)', async () => {
+    const gw = global.__gw;
+    const r = await gw.reportDiscovery([{ ipAddress: testIp(0), macAddress: 'AA:BB:CC:DD:EE:01' }]);
+    S.assert(r.status === 200 || r.status === 201, `status ${r.status}`);
+    return { detail: 'discovery accepted' };
+  });
+  await S.scenario('Gateway', 'invalid gateway token → 401', async () => {
+    const api = new ApiClient({ metrics });
+    const r = await api.get('/gateway/status?gatewayId=x', { auth: false, headers: { 'x-gateway-token': 'bogus' } });
+    S.assert(r.status === 401, `status ${r.status}`);
+    return { detail: '401' };
+  });
+
+  // ================= NOTIFICATIONS =================
+  await S.scenario('Notifications', 'list endpoint reachable', async () => {
+    const r = await parent.get('/notifications');
+    S.assert(r.status === 200 && Array.isArray(r.data), `status ${r.status}`);
+    return { detail: `${r.data.length} events` };
+  });
+  S.markNotExecuted('Notifications', 'FCM delivery + retries', 'push delivery is credential-gated (no Firebase service account)');
+
+  // ================= REPORTS =================
+  await S.scenario('Reports', 'weekly', async () => {
+    const r = await parent.get('/reports/weekly');
+    S.assert(r.status === 200 && r.data.period, `status ${r.status}`);
+    return { detail: `label ${r.data.label}` };
+  });
+  await S.scenario('Reports', 'device-health summary', async () => {
+    const r = await parent.get('/device-health');
+    S.assert(r.status === 200 && typeof r.data.total === 'number', `status ${r.status}`);
+    return { detail: `${r.data.protectedCount}/${r.data.total} protected` };
+  });
+
+  // ================= SCHEDULER =================
+  S.markNotExecuted('Scheduler', 'bedtime start/end', 'server cron; not observable within a short live run');
+  S.markNotExecuted('Scheduler', 'gaming expiry', 'server cron + elapsed time; covered by unit test');
+  S.markNotExecuted('Scheduler', 'cache cleanup', 'server cron');
+
+  // ================= SECURITY =================
+  await S.scenario('Security', 'SQL injection stored as literal', async () => {
+    const payload = "Bobby'); DROP TABLE devices;--";
+    const r = await parent.post('/children', { name: payload, age: 8 });
+    S.assert(r.status === 201 && r.data.name === payload, `status ${r.status}`);
+    const still = await parent.get('/children');
+    S.assert(still.status === 200, 'table missing after injection');
+    return { detail: 'stored literal, table intact' };
+  });
+  await S.scenario('Security', 'replay attack (reused refresh → 401)', async () => {
+    const login = await new ApiClient({ metrics }).post('/auth/login', { email: parent._email, password: config.password });
+    const rt = login.data.refreshToken;
+    const api = new ApiClient({ metrics });
+    const first = await api.post('/auth/refresh', { refreshToken: rt });
+    const second = await api.post('/auth/refresh', { refreshToken: rt });
+    S.assert(first.status === 200 && second.status === 401, `first ${first.status} second ${second.status}`);
+    return { detail: '200 then 401' };
+  });
+  await S.scenario('Security', 'rate limiting active (auth burst → 429)', async () => {
+    const api = new ApiClient({ metrics });
+    let saw429 = false;
+    for (let i = 0; i < 12; i++) {
+      const r = await api.post('/auth/login', { email: 'x@x.com', password: 'wrong' });
+      if (r.status === 429) { saw429 = true; break; }
+    }
+    S.assert(saw429, 'no 429 within 12 rapid logins');
+    return { detail: '429 enforced' };
+  });
+  await S.scenario('Security', 'DNS spam → throttle behaviour (documents fail-open bug)', async () => {
+    const api = new ApiClient({ metrics });
+    let ok = 0, throttled = 0;
+    for (let i = 0; i < 30; i++) {
+      const r = await api.get(`/dns/policy/check?sourceIp=${testIp(0)}&domain=spam${i}.example`, { auth: false });
+      if (r.status === 429) throttled++; else if (r.status === 200) ok++;
+    }
+    if (throttled > 0) {
+      return { status: S.WARN, detail: `${throttled}/30 got 429 — DNS endpoint is throttled (SkipThrottle fix not deployed → resolver fails open)` };
+    }
+    return { detail: `0/30 throttled — SkipThrottle deployed` };
+  });
+
+  // ================= LOAD (safe tier) =================
+  const load = { tiers: [], note: '' };
+  let chaos = [];
+  try {
+    await runLoad(load, parent, childId);
+    // ================= CHAOS (client-side) =================
+    chaos = await runChaos();
+  } finally {
+    // ---------- CLEANUP (always) ----------
+    for (const api of createdParents) {
+      try { await api.delete('/parents/profile'); } catch { /* ignore */ }
+    }
+    // ---------- REPORT (always) ----------
+    const resources = processResources();
+    const meta = {
+      generatedAt: new Date().toISOString(),
+      baseUrl: config.BASE_URL,
+      isProd: config.isProd,
+      apiMetrics: metrics.summary(),
+    };
+    const out = report.generate({ results: S.RESULTS, load, chaos, resources, meta });
+    console.log(`\nReport: pass rate ${out.passRate}% (of executed). Wrote simulation-report.md / .json\n`);
+  }
+}
+
+async function runLoad(load, parent, childId) {
+  for (const n of config.loadTiers) {
+    if (config.isProd && n > 10) {
+      load.note = 'Heavy tiers (50–1000) are disabled against production. Set SIM_BASE_URL to a local/staging backend and SIM_ALLOW_HEAVY=1.';
+      continue;
+    }
+    const lm = new Metrics();
+    const devices = [];
+    for (let i = 0; i < n; i++) {
+      const d = new ChildDevice({ api: parent, childId, name: `load-${i}`, type: 'PC', ip: testIp(i + 5), metrics: lm });
+      // Reuse ONE registered device IP space; register a few, reuse for queries to limit writes.
+      devices.push(d);
+    }
+    // Register a small pool of real devices (cap writes to prod), reuse their IPs for queries.
+    const pool = Math.min(n, config.isProd ? 3 : 25);
+    for (let i = 0; i < pool; i++) await devices[i].register();
+    const start = performance.now();
+    let errors = 0;
+    // Fire queries concurrently from the pool; count throttle/errors honestly.
+    const tasks = [];
+    for (let i = 0; i < n; i++) {
+      const d = devices[i % pool];
+      tasks.push((async () => {
+        for (let q = 0; q < config.queriesPerDevice; q++) {
+          const r = await d.dnsQuery(`load-${i}-${q}.example`);
+          if (r.status !== 200) errors++;
+        }
+      })());
+    }
+    await Promise.all(tasks);
+    const secs = (performance.now() - start) / 1000;
+    const sum = lm.summary();
+    load.tiers.push({
+      devices: n,
+      requests: sum.requests,
+      avgMs: sum.avgMs,
+      p50Ms: sum.p50Ms,
+      p95Ms: sum.p95Ms,
+      maxMs: sum.maxMs,
+      errors,
+      throughput: +(sum.requests / Math.max(secs, 0.001)).toFixed(1),
+    });
+  }
+  if (config.isProd) {
+    load.note = (load.note || '') + ' NOTE: against production the shared 100/min throttle caps throughput; the numbers reflect prod safety limits, not backend capacity.';
+  }
+}
+
+async function runChaos() {
+  const results = [];
+  const net = new NetworkSimulator();
+  const api = new ApiClient({ metrics, chaos: net.hook() });
+
+  // Client high latency: request should still succeed, just slower.
+  net.highLatency(1200);
+  const t0 = performance.now();
+  const r1 = await api.get('/health', { auth: false });
+  net.reset();
+  results.push({
+    name: 'client high latency (+1200ms)',
+    status: r1.status === 200 ? 'PASS' : 'FAIL',
+    detail: `status ${r1.status}, ~${Math.round(performance.now() - t0)}ms`,
+  });
+
+  // Client packet loss: some requests time out; client must not hang/crash.
+  net.packetLoss(1.0);
+  const r2 = await api.get('/health', { auth: false, timeoutMs: 2000 });
+  net.reset();
+  results.push({
+    name: 'client 100% packet loss (timeout handled)',
+    status: r2.status === 0 && r2.error ? 'PASS' : 'WARN',
+    detail: `aborted cleanly=${r2.status === 0}`,
+  });
+
+  // Unreachable backend: connection refused handled gracefully.
+  const dead = new ApiClient({ baseUrl: 'http://127.0.0.1:59999', metrics: new Metrics() });
+  const r3 = await dead.get('/health', { auth: false, timeoutMs: 3000 });
+  results.push({
+    name: 'backend unreachable (client resilience)',
+    status: r3.status <= 0 ? 'PASS' : 'FAIL',
+    detail: `handled without throw, status ${r3.status}`,
+  });
+
+  results.push({
+    name: 'server-side chaos (crash Redis/DB/backend, PM2 restart)',
+    status: 'NOT_EXECUTED',
+    detail: 'requires host/SSH access to the VPS or a local stack; destructive on production — not run',
+  });
+  return results;
+}
+
+main().catch((err) => {
+  console.error('FATAL', err);
+  // Best-effort cleanup on fatal error.
+  Promise.all(createdParents.map((a) => a.delete('/parents/profile').catch(() => {}))).finally(() =>
+    process.exit(1),
+  );
+});
