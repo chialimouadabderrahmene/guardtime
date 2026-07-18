@@ -1,23 +1,23 @@
 {
   "meta": {
-    "generatedAt": "2026-07-17T17:29:08.238Z",
+    "generatedAt": "2026-07-18T01:23:28.989Z",
     "baseUrl": "https://api.waqti.pro",
     "isProd": true,
     "apiMetrics": {
-      "requests": 146,
-      "avgMs": 126,
-      "p50Ms": 83,
-      "p95Ms": 323,
-      "maxMs": 1281,
+      "requests": 152,
+      "avgMs": 100,
+      "p50Ms": 69,
+      "p95Ms": 282,
+      "maxMs": 1269,
       "statusCounts": {
         "0": 1,
-        "200": 113,
+        "200": 115,
         "201": 16,
         "204": 5,
-        "400": 1,
+        "400": 3,
         "401": 7,
         "403": 1,
-        "404": 1,
+        "404": 3,
         "429": 1
       },
       "counters": {
@@ -26,9 +26,9 @@
     }
   },
   "counts": {
-    "PASS": 34,
+    "PASS": 39,
     "NOT_EXECUTED": 5,
-    "WARN": 1
+    "WARN": 5
   },
   "passRate": 100,
   "results": [
@@ -108,7 +108,7 @@
       "group": "Database",
       "name": "CRUD: create device persists",
       "status": "PASS",
-      "detail": "deviceId a968d930",
+      "detail": "deviceId ac0f7ca7",
       "evidence": null,
       "error": null
     },
@@ -228,7 +228,7 @@
       "group": "Gateway",
       "name": "register + pair",
       "status": "PASS",
-      "detail": "paired token fcc67e…",
+      "detail": "paired token e10024…",
       "evidence": null,
       "error": null
     },
@@ -257,6 +257,78 @@
       "error": null
     },
     {
+      "group": "Gateway Agent",
+      "name": "L3-L7 full dry-run sync cycle completes without error",
+      "status": "PASS",
+      "detail": "discovery → connection-killer → firewall (block+VPN+QUIC) → qos/bandwidth → vpn-detector, all ran",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Gateway Agent",
+      "name": "L3: management IP is never enforced against, even when policy says BLOCK",
+      "status": "PASS",
+      "detail": "only the guard's own refusal log mentions the management IP; zero enforcement rules do",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Gateway Agent",
+      "name": "L6: QUIC (UDP/443) blocking enforced for the per-device flag",
+      "status": "PASS",
+      "detail": "dev-blocked (quicBlock=true) triggered enforcement",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Gateway Agent",
+      "name": "L7: bandwidth limits (device-level + category-level) applied",
+      "status": "PASS",
+      "detail": "dev-throttled (device-level cap) + dev-normal (GAMING category cap) both applied",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Gateway Agent",
+      "name": "L4: /gateway/discovery accepts fingerprint fields",
+      "status": "WARN",
+      "detail": "400 — backend not yet redeployed with the Layer 4 discovery DTO fields",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Gateway Agent",
+      "name": "L5/L6/L7: /gateway/policies response includes vpnBlock/quicBlock/bandwidthLimits",
+      "status": "WARN",
+      "detail": "no devices attached to the sim gateway to inspect fields on",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Gateway Agent",
+      "name": "L5: /gateway/vpn-detections accepts a detection report",
+      "status": "WARN",
+      "detail": "404 — endpoint not yet deployed",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Gateway Agent",
+      "name": "L5/L6: parent can toggle vpnBlockEnabled/quicBlockEnabled on a device",
+      "status": "WARN",
+      "detail": "400 — backend not yet redeployed with the Layer 5/6 device DTO fields",
+      "evidence": null,
+      "error": null
+    },
+    {
+      "group": "Gateway Agent",
+      "name": "L7: bandwidth-limit CRUD validates scope and persists",
+      "status": "WARN",
+      "detail": "404 — /bandwidth-limits not yet deployed",
+      "evidence": null,
+      "error": null
+    },
+    {
       "group": "Notifications",
       "name": "list endpoint reachable",
       "status": "PASS",
@@ -275,8 +347,8 @@
     {
       "group": "Notifications",
       "name": "FCM delivery + retries",
-      "status": "WARN",
-      "detail": "firebaseStatus=undefined — real delivery not configured on this deployment. Token register/unregister proven above; send/multicast/retry/invalid-token/offline-device proven by fcm.sender.spec.ts + push.service.spec.ts (mocked, 18 cases).",
+      "status": "PASS",
+      "detail": "Firebase Admin SDK live-initialized on production (health/ready firebase=up). Retry-on-transient-failure logic is covered by fcm.sender.spec.ts (18 cases) — not forced live here since a real transient FCM outage cannot be triggered externally.",
       "evidence": null,
       "error": null
     },
@@ -284,7 +356,7 @@
       "group": "Reports",
       "name": "weekly",
       "status": "PASS",
-      "detail": "label Jul 11 – Jul 17",
+      "detail": "label Jul 12 – Jul 18",
       "evidence": null,
       "error": null
     },
@@ -372,7 +444,7 @@
     {
       "name": "client high latency (+1200ms)",
       "status": "PASS",
-      "detail": "status 200, ~1282ms"
+      "detail": "status 200, ~1269ms"
     },
     {
       "name": "client 100% packet loss (timeout handled)",
@@ -391,9 +463,9 @@
     }
   ],
   "resources": {
-    "rssMB": 63.2,
-    "heapUsedMB": 11.7,
-    "cpuUserMs": 296,
+    "rssMB": 64.9,
+    "heapUsedMB": 13.4,
+    "cpuUserMs": 484,
     "cpuSystemMs": 140
   }
 }

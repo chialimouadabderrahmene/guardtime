@@ -7,6 +7,7 @@ const S = require('../lib/scenario');
 const { ChildDevice } = require('../child-simulator/child-device');
 const { GatewaySimulator } = require('../gateway-simulator/gateway');
 const { NetworkSimulator } = require('../network-simulator/network');
+const { runGatewayAgentDryCycle } = require('../gateway-agent-simulator/run-dry-cycle');
 const report = require('../report-generator/report');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -228,6 +229,138 @@ async function main() {
     const r = await api.get('/gateway/status?gatewayId=x', { auth: false, headers: { 'x-gateway-token': 'bogus' } });
     S.assert(r.status === 401, `status ${r.status}`);
     return { detail: '401' };
+  });
+
+  // ================= GATEWAY AGENT (Layers 3-7 security hardening) =================
+  // gateway-agent is a standalone daemon meant to run on a customer's Linux
+  // router, not inside this Node/Windows-only lab — it cannot be driven over
+  // HTTP like the rest of this file. The dry-run cycle below requires the
+  // REAL gateway-agent modules (connection-killer, firewall/nftables, VPN
+  // detector, QUIC block, bandwidth control) end-to-end with dryRun:true, so
+  // no Linux command is ever actually invoked. See simulation/gateway-agent-
+  // simulator/run-dry-cycle.js for exactly what this does and does not prove.
+  await S.scenario('Gateway Agent', 'L3-L7 full dry-run sync cycle completes without error', async () => {
+    const result = await runGatewayAgentDryCycle();
+    if (result.error) {
+      return { status: S.FAIL, detail: `syncOnce threw: ${result.error.message}` };
+    }
+    return { detail: 'discovery → connection-killer → firewall (block+VPN+QUIC) → qos/bandwidth → vpn-detector, all ran' };
+  });
+  await S.scenario('Gateway Agent', 'L3: management IP is never enforced against, even when policy says BLOCK', async () => {
+    const result = await runGatewayAgentDryCycle();
+    const mgmtLine = result.logLines.find((l) => l.includes('10.0.0.1'));
+    S.assert(!!mgmtLine, 'no log line referenced the management IP at all — cannot verify the guard fired');
+    S.assert(mgmtLine.includes('refusing to enforce against protected IP'), `unexpected reference: ${mgmtLine}`);
+    const anyRuleAgainstIt = result.logLines.some(
+      (l) => l.includes('10.0.0.1') && !l.includes('refusing to enforce'),
+    );
+    S.assert(!anyRuleAgainstIt, 'a block/vpn/quic/bandwidth rule referenced the management IP');
+    return { detail: 'only the guard\'s own refusal log mentions the management IP; zero enforcement rules do' };
+  });
+  await S.scenario('Gateway Agent', 'L6: QUIC (UDP/443) blocking enforced for the per-device flag', async () => {
+    const result = await runGatewayAgentDryCycle();
+    S.assert(
+      result.logLines.some((l) => l.includes('quic (udp/443) blocking enforced')),
+      'no quic enforcement log line found',
+    );
+    return { detail: 'dev-blocked (quicBlock=true) triggered enforcement' };
+  });
+  await S.scenario('Gateway Agent', 'L7: bandwidth limits (device-level + category-level) applied', async () => {
+    const result = await runGatewayAgentDryCycle();
+    S.assert(
+      result.logLines.some((l) => l.includes('bandwidth limits enforced')),
+      'no bandwidth enforcement log line found',
+    );
+    return { detail: 'dev-throttled (device-level cap) + dev-normal (GAMING category cap) both applied' };
+  });
+
+  // ================= BACKEND API SURFACE FOR LAYERS 4-7 =================
+  // Exercises the new endpoints/fields directly against whatever backend is
+  // configured (defaults to prod). Since this hardening pass has not been
+  // deployed yet at the time this lab runs, these honestly report WARN
+  // (not a fake PASS) when the live server doesn't yet have the new
+  // endpoint/field — exactly like this lab's existing SkipThrottle-pending
+  // scenario. Re-run after deployment to turn them into real PASSes.
+  await S.scenario('Gateway Agent', 'L4: /gateway/discovery accepts fingerprint fields', async () => {
+    const gw = global.__gw;
+    if (!gw) return { status: S.WARN, detail: 'no paired gateway from the earlier scenario' };
+    const r = await gw.reportDiscovery([
+      {
+        ipAddress: testIp(1),
+        macAddress: 'AA:BB:CC:DD:EE:02',
+        hostname: 'sim-device',
+        dhcpClientId: '01:aa:bb:cc:dd:ee:02',
+        vendorOui: 'Apple',
+        osHint: 'unix-like',
+      },
+    ]);
+    if (r.status === 400) {
+      return { status: S.WARN, detail: `400 — backend not yet redeployed with the Layer 4 discovery DTO fields` };
+    }
+    S.assert(r.status === 200 || r.status === 201, `status ${r.status}`);
+    return { detail: 'accepted with fingerprint fields' };
+  });
+  await S.scenario('Gateway Agent', 'L5/L6/L7: /gateway/policies response includes vpnBlock/quicBlock/bandwidthLimits', async () => {
+    const gw = global.__gw;
+    if (!gw) return { status: S.WARN, detail: 'no paired gateway from the earlier scenario' };
+    const r = await gw.pollPolicies();
+    S.assert(r.status === 200, `status ${r.status}`);
+    const devices = (r.policies && r.policies.devices) || [];
+    if (devices.length === 0) {
+      return { status: S.WARN, detail: 'no devices attached to the sim gateway to inspect fields on' };
+    }
+    const sample = devices[0];
+    const hasNewFields = 'vpnBlock' in sample && 'quicBlock' in sample && 'bandwidthLimits' in sample;
+    if (!hasNewFields) {
+      return { status: S.WARN, detail: 'fields missing — backend not yet redeployed with Layers 5-7' };
+    }
+    return { detail: `vpnBlock=${sample.vpnBlock} quicBlock=${sample.quicBlock} bandwidthLimits=${sample.bandwidthLimits.length}` };
+  });
+  await S.scenario('Gateway Agent', 'L5: /gateway/vpn-detections accepts a detection report', async () => {
+    const gw = global.__gw;
+    if (!gw) return { status: S.WARN, detail: 'no paired gateway from the earlier scenario' };
+    const r = await gw.api.post(
+      `/gateway/vpn-detections?gatewayId=${gw.gatewayId}`,
+      { detections: [{ deviceId: 'nonexistent-device', provider: 'NordVPN', method: 'dns-pattern', detail: 'nordvpn.com' }] },
+      { auth: false, headers: gw.headers() },
+    );
+    if (r.status === 404) {
+      return { status: S.WARN, detail: '404 — endpoint not yet deployed' };
+    }
+    S.assert(r.status === 200 || r.status === 201, `status ${r.status}`);
+    S.assert(r.data && r.data.recorded === 0, `expected recorded=0 for an unknown deviceId, got ${JSON.stringify(r.data)}`);
+    return { detail: 'endpoint reachable, correctly ignored an unknown deviceId' };
+  });
+  await S.scenario('Gateway Agent', 'L5/L6: parent can toggle vpnBlockEnabled/quicBlockEnabled on a device', async () => {
+    const r = await parent.patch(`/devices/${device.deviceId}`, { vpnBlockEnabled: false, quicBlockEnabled: true });
+    if (r.status === 400) {
+      return { status: S.WARN, detail: '400 — backend not yet redeployed with the Layer 5/6 device DTO fields' };
+    }
+    S.assert(r.status === 200, `status ${r.status}`);
+    S.assert(r.data.vpnBlockEnabled === false && r.data.quicBlockEnabled === true, `unexpected values: ${JSON.stringify({ vpnBlockEnabled: r.data.vpnBlockEnabled, quicBlockEnabled: r.data.quicBlockEnabled })}`);
+    return { detail: 'toggled and persisted' };
+  });
+  await S.scenario('Gateway Agent', 'L7: bandwidth-limit CRUD validates scope and persists', async () => {
+    const bad = await parent.post('/bandwidth-limits', { downloadKbps: 1000 });
+    if (bad.status === 404) {
+      return { status: S.WARN, detail: '404 — /bandwidth-limits not yet deployed' };
+    }
+    S.assert(bad.status === 400, `expected 400 for missing childId/deviceId, got ${bad.status}`);
+
+    const created = await parent.post('/bandwidth-limits', {
+      deviceId: device.deviceId,
+      category: 'GAMING',
+      downloadKbps: 512,
+      uploadKbps: 512,
+    });
+    S.assert(created.status === 201 || created.status === 200, `create status ${created.status}`);
+
+    const list = await parent.get('/bandwidth-limits');
+    S.assert(list.status === 200 && list.data.some((l) => l.id === created.data.id), 'created limit not listed');
+
+    const removed = await parent.delete(`/bandwidth-limits/${created.data.id}`);
+    S.assert(removed.status === 200 || removed.status === 204, `delete status ${removed.status}`);
+    return { detail: 'validation + create + list + delete all correct' };
   });
 
   // ================= NOTIFICATIONS =================

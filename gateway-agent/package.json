@@ -1,6 +1,6 @@
 {
   "name": "guardtime-gateway-agent",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Linux gateway-level enforcement agent for GuardTime parental control",
   "private": true,
   "license": "UNLICENSED",
@@ -8,9 +8,17 @@
   "main": "src/main.js",
   "scripts": {
     "start": "node src/main.js",
-    "check": "node --check src/main.js && node --check src/backend-client.js && node --check src/config.js && node --check src/device-discovery.js && node --check src/iptables-controller.js && node --check src/conntrack-controller.js && node --check src/tcp-rst-controller.js && node --check src/qos-controller.js && node --check src/logger.js"
+    "check": "for f in src/*.js; do node --check \"$f\" || exit 1; done",
+    "test": "jest"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": ["**/test/**/*.spec.js"]
   }
 }

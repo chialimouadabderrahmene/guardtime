@@ -74,6 +74,9 @@ function resolvePolicyTarget(policy, discoveredDevices) {
     reason: policy.reason,
     ipAddress: byMac?.ipAddress || policy.ipAddress || policy.dnsSourceIp || null,
     macAddress: normalizedMac || byMac?.macAddress || null,
+    vpnBlock: policy.vpnBlock ?? false,
+    quicBlock: policy.quicBlock ?? false,
+    bandwidthLimits: policy.bandwidthLimits ?? [],
   };
 }
 

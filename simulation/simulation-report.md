@@ -1,8 +1,8 @@
 # GuardTime Simulation Lab — Report
 
-- Generated: 2026-07-17T17:29:08.238Z
+- Generated: 2026-07-18T01:23:28.989Z
 - Target: `https://api.waqti.pro` (PRODUCTION — heavy load & server chaos disabled)
-- Executed assertions: 34 · PASS 34 · FAIL 0 · WARN 1 · NOT_EXECUTED 5
+- Executed assertions: 39 · PASS 39 · FAIL 0 · WARN 5 · NOT_EXECUTED 5
 - Pass rate (of executed): **100%**
 
 ## Auth
@@ -23,7 +23,7 @@
 | Scenario | Result | Detail |
 |---|---|---|
 | CRUD: create+read child persists | PASS | 1 children |
-| CRUD: create device persists | PASS | deviceId a968d930 |
+| CRUD: create device persists | PASS | deviceId ac0f7ca7 |
 | CRUD: update device | PASS | renamed |
 | CRUD: IDOR — random device id not accessible | PASS | 404 |
 
@@ -53,10 +53,24 @@
 
 | Scenario | Result | Detail |
 |---|---|---|
-| register + pair | PASS | paired token fcc67e… |
+| register + pair | PASS | paired token e10024… |
 | poll policies (gateway token) | PASS | policies obj |
 | report discovery (ARP) | PASS | discovery accepted |
 | invalid gateway token → 401 | PASS | 401 |
+
+## Gateway Agent
+
+| Scenario | Result | Detail |
+|---|---|---|
+| L3-L7 full dry-run sync cycle completes without error | PASS | discovery → connection-killer → firewall (block+VPN+QUIC) → qos/bandwidth → vpn-detector, all ran |
+| L3: management IP is never enforced against, even when policy says BLOCK | PASS | only the guard's own refusal log mentions the management IP; zero enforcement rules do |
+| L6: QUIC (UDP/443) blocking enforced for the per-device flag | PASS | dev-blocked (quicBlock=true) triggered enforcement |
+| L7: bandwidth limits (device-level + category-level) applied | PASS | dev-throttled (device-level cap) + dev-normal (GAMING category cap) both applied |
+| L4: /gateway/discovery accepts fingerprint fields | WARN | 400 — backend not yet redeployed with the Layer 4 discovery DTO fields |
+| L5/L6/L7: /gateway/policies response includes vpnBlock/quicBlock/bandwidthLimits | WARN | no devices attached to the sim gateway to inspect fields on |
+| L5: /gateway/vpn-detections accepts a detection report | WARN | 404 — endpoint not yet deployed |
+| L5/L6: parent can toggle vpnBlockEnabled/quicBlockEnabled on a device | WARN | 400 — backend not yet redeployed with the Layer 5/6 device DTO fields |
+| L7: bandwidth-limit CRUD validates scope and persists | WARN | 404 — /bandwidth-limits not yet deployed |
 
 ## Notifications
 
@@ -64,13 +78,13 @@
 |---|---|---|
 | list endpoint reachable | PASS | 0 events |
 | push token register/unregister round trip | PASS | 204 / 204 |
-| FCM delivery + retries | WARN | firebaseStatus=undefined — real delivery not configured on this deployment. Token register/unregister proven above; send/multicast/retry/invalid-token/offline-d |
+| FCM delivery + retries | PASS | Firebase Admin SDK live-initialized on production (health/ready firebase=up). Retry-on-transient-failure logic is covered by fcm.sender.spec.ts (18 cases) — not |
 
 ## Reports
 
 | Scenario | Result | Detail |
 |---|---|---|
-| weekly | PASS | label Jul 11 – Jul 17 |
+| weekly | PASS | label Jul 12 – Jul 18 |
 | device-health summary | PASS | 1/1 protected |
 
 ## Scheduler
@@ -102,7 +116,7 @@
 
 | Fault | Result | Detail |
 |---|---|---|
-| client high latency (+1200ms) | PASS | status 200, ~1282ms |
+| client high latency (+1200ms) | PASS | status 200, ~1269ms |
 | client 100% packet loss (timeout handled) | PASS | aborted cleanly=true |
 | backend unreachable (client resilience) | PASS | handled without throw, status -1 |
 | server-side chaos (crash Redis/DB/backend, PM2 restart) | NOT_EXECUTED | requires host/SSH access to the VPS or a local stack; destructive on production — not run |
@@ -111,9 +125,9 @@
 
 ```json
 {
-  "rssMB": 63.2,
-  "heapUsedMB": 11.7,
-  "cpuUserMs": 296,
+  "rssMB": 64.9,
+  "heapUsedMB": 13.4,
+  "cpuUserMs": 484,
   "cpuSystemMs": 140
 }
 ```

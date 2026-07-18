@@ -4,13 +4,19 @@ const { loadConfig } = require('./config');
 const logger = require('./logger');
 const { BackendClient } = require('./backend-client');
 const { discoverDevices, resolvePolicyTarget } = require('./device-discovery');
-const { IptablesController } = require('./iptables-controller');
+const { enrichWithFingerprint } = require('./fingerprint');
+const { createFirewallController } = require('./firewall-controller');
 const { ConntrackController } = require('./conntrack-controller');
 const { TcpRstController } = require('./tcp-rst-controller');
 const { QosController } = require('./qos-controller');
+const { ManagementGuard } = require('./management-guard');
+const { ConnectionKiller } = require('./connection-killer');
+const { DnsSniffController } = require('./dns-sniff-controller');
+const { VpnDetector } = require('./vpn-detector');
+const { DnsResolveCache } = require('./dns-resolve-cache');
+const { Metrics } = require('./metrics');
 
 let stopping = false;
-const deviceStates = new Map();
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -25,100 +31,94 @@ function summarize(targets) {
   };
 }
 
-function shouldRunActiveTermination(target) {
-  const previous = deviceStates.get(target.deviceId);
-  return (
-    target.action === 'BLOCK' &&
-    target.ipAddress &&
-    (
-      !previous ||
-      previous.action !== 'BLOCK' ||
-      previous.ipAddress !== target.ipAddress ||
-      previous.macAddress !== target.macAddress
-    )
-  );
-}
+async function syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos, managementGuard, metrics, config }) {
+  await managementGuard.refresh();
 
-function rememberStates(targets) {
-  const seen = new Set();
-  for (const target of targets) {
-    seen.add(target.deviceId);
-    deviceStates.set(target.deviceId, {
-      action: target.action,
-      ipAddress: target.ipAddress,
-      macAddress: target.macAddress,
-    });
-  }
-  for (const deviceId of deviceStates.keys()) {
-    if (!seen.has(deviceId)) deviceStates.delete(deviceId);
-  }
-}
-
-async function applyActiveTermination(targets, conntrack, tcpReset) {
-  for (const target of targets) {
-    if (!shouldRunActiveTermination(target)) continue;
-
-    const flows = await conntrack.listTcpConnections(target.ipAddress).catch((err) => {
-      logger.warn('failed to capture tcp flows before block', { deviceId: target.deviceId, error: err.message });
-      return [];
-    });
-
-    logger.info('active block transition detected', {
-      deviceId: target.deviceId,
-      ipAddress: target.ipAddress,
-      macAddress: target.macAddress,
-      tcpFlows: flows.length,
-    });
-
-    await conntrack.killDevice(target.ipAddress);
-    await tcpReset.killDevice(target.ipAddress, flows);
-  }
-}
-
-async function syncOnce({ backend, firewall, conntrack, tcpReset, qos, config }) {
   const discovered = await discoverDevices(config, logger);
-  if (discovered.length > 0) {
-    await backend.reportDiscovery(discovered).catch((err) => {
+  const enriched = await enrichWithFingerprint(discovered, config, logger);
+  if (enriched.length > 0) {
+    await backend.reportDiscovery(enriched).catch((err) => {
       logger.warn('failed to report discovery', { error: err.message });
     });
   }
 
   const policies = await backend.getPolicies();
-  const targets = (policies.devices || []).map((policy) => resolvePolicyTarget(policy, discovered));
+  const allTargets = (policies.devices || []).map((policy) => resolvePolicyTarget(policy, enriched));
 
-  await applyActiveTermination(targets, conntrack, tcpReset);
+  // Never enforce ANY action (kill, block, throttle, VPN/QUIC/bandwidth
+  // rule) against the gateway's own management IP, no matter what the
+  // backend policy says. This is the single upstream choke point for that
+  // guarantee; connectionKiller additionally re-checks internally as
+  // defense in depth, but firewall/qos/vpnDetector rely on this filter.
+  const targets = managementGuard.filterTargets(allTargets);
+
+  await connectionKiller.sync(targets);
 
   await firewall.sync({
     targets,
     dnsRedirectIp: config.dnsRedirectIp,
     enableDnsRedirect: config.enableDnsRedirect,
+    enableQuicBlockGlobal: config.enableQuicBlockGlobal,
   });
 
-  await qos.sync(targets);
-  rememberStates(targets);
+  const quicBlockedCount = targets.filter(
+    (target) => target.ipAddress && (config.enableQuicBlockGlobal || target.quicBlock),
+  ).length;
+  if (quicBlockedCount > 0) {
+    metrics.inc('quicBlock.enforced', quicBlockedCount);
+    logger.info('quic (udp/443) blocking enforced', {
+      devices: quicBlockedCount,
+      global: config.enableQuicBlockGlobal,
+    });
+  }
 
-  logger.info('gateway policy sync complete', summarize(targets));
+  await qos.sync(targets);
+
+  if (config.enableVpnBlock) {
+    const detections = await vpnDetector.sync(targets);
+    if (detections.length > 0) {
+      await backend.reportVpnDetections(detections).catch((err) => {
+        logger.warn('failed to report vpn detections', { error: err.message });
+      });
+    }
+  }
+
+  logger.info('gateway policy sync complete', { ...summarize(targets), metrics: metrics.flush() });
 }
 
 async function main() {
   const config = loadConfig();
   const backend = new BackendClient(config);
-  const firewall = new IptablesController(config, logger);
+  const firewall = createFirewallController(config, logger);
   const conntrack = new ConntrackController(config, logger);
   const tcpReset = new TcpRstController(config, logger, conntrack);
-  const qos = new QosController(config, logger);
+  const metrics = new Metrics();
+  const dnsResolveCache = new DnsResolveCache();
+  const qos = new QosController(config, logger, metrics, dnsResolveCache);
+  const managementGuard = new ManagementGuard(config, logger);
+  const connectionKiller = new ConnectionKiller({
+    conntrack,
+    tcpReset,
+    managementGuard,
+    metrics,
+    logger,
+  });
+  const dnsSniff = new DnsSniffController(config, logger);
+  const vpnDetector = new VpnDetector({ conntrack, dnsSniff, metrics, logger });
 
   logger.info('GuardTime gateway-agent starting', {
     backendUrl: config.backendUrl,
     pollIntervalMs: config.pollIntervalMs,
     dnsRedirectIp: config.enableDnsRedirect ? config.dnsRedirectIp : null,
     qosInterfaces: config.qosInterfaces,
+    firewallBackend: config.firewallBackend,
+    managementIps: config.managementIps,
     dryRun: config.dryRun,
   });
 
   while (!stopping) {
     try {
-      await syncOnce({ backend, firewall, conntrack, tcpReset, qos, config });
+      await syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos, managementGuard, metrics, config });
     } catch (err) {
       logger.error('gateway policy sync failed', { error: err.message });
     }
@@ -133,7 +133,11 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   });
 }
 
-main().catch((err) => {
-  logger.error('fatal startup error', { error: err.message });
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    logger.error('fatal startup error', { error: err.message });
+    process.exit(1);
+  });
+}
+
+module.exports = { syncOnce, summarize };

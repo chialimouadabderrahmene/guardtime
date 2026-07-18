@@ -58,6 +58,55 @@ function loadConfig() {
       .split(',')
       .map((iface) => iface.trim())
       .filter(Boolean),
+
+    // Layer 3: explicit IPs that must never be blocked/killed/throttled, in
+    // addition to the gateway's own dynamically-detected management IP.
+    managementIps: (process.env.GATEWAY_MANAGEMENT_IPS || '')
+      .split(',')
+      .map((ip) => ip.trim())
+      .filter(Boolean),
+
+    // Layer 3: 'iptables' (default, preserves existing behaviour) or
+    // 'nftables'. Opt-in only so existing deployments are unaffected.
+    firewallBackend: (process.env.FIREWALL_BACKEND || 'iptables').toLowerCase(),
+    nftBin: process.env.NFT_BIN || 'nft',
+
+    // Layer 5: VPN blocking is enforced per-device via the policy payload's
+    // vpnBlock flag; this just controls whether the agent honours it at all.
+    enableVpnBlock: bool('ENABLE_VPN_BLOCK', true),
+
+    // Layer 5: DNS-pattern detection needs a short passive sniff per device
+    // per cycle (same scapy technique already used for TCP RST injection).
+    // Off by default — opt-in, since it adds a sniff window to every cycle.
+    enableVpnDnsSniff: bool('ENABLE_VPN_DNS_SNIFF', false),
+    vpnDnsSniffMs: int('VPN_DNS_SNIFF_MS', 500),
+
+    // Layer 6: QUIC (HTTP/3, UDP/443) blocking. Global applies to every
+    // device; per-device is still driven by the policy payload's quicBlock
+    // flag either way.
+    enableQuicBlockGlobal: bool('ENABLE_QUIC_BLOCK_GLOBAL', false),
+
+    // Layer 7: bandwidth control.
+    enableBandwidthControl: bool('ENABLE_BANDWIDTH_CONTROL', true),
+    ipsetBin: process.env.IPSET_BIN || 'ipset',
+
+    // Layer 7: dedicated LAN/WAN interfaces let download and upload be
+    // shaped independently and correctly. Left unset, both directions fall
+    // back to qosInterfaces (works, but on a single shared interface only
+    // whichever direction actually egresses there is shaped correctly).
+    lanInterface: process.env.LAN_INTERFACE || '',
+    wanInterface: process.env.WAN_INTERFACE || '',
+
+    // Layer 4: optional dnsmasq-format lease file for hostname/DHCP-client-id
+    // enrichment. Left unset, fingerprinting still works from MAC/IP alone.
+    dhcpLeasesFile: process.env.DHCP_LEASES_FILE || '',
+
+    // Layer 4: OS hint is a best-effort TTL heuristic that requires actively
+    // pinging every discovered device each cycle. Off by default so a stock
+    // deployment never sends extra probe traffic; opt-in via env.
+    enableOsHint: bool('ENABLE_OS_HINT', false),
+    pingBin: process.env.PING_BIN || 'ping',
+    osHintTimeoutMs: int('OS_HINT_TIMEOUT_MS', 1000),
   };
 
   if (!config.gatewayToken) {

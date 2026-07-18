@@ -17,6 +17,13 @@ class BackendClient {
     });
   }
 
+  async reportVpnDetections(detections) {
+    return this.request('/gateway/vpn-detections', {
+      method: 'POST',
+      body: JSON.stringify({ detections }),
+    });
+  }
+
   async request(path, options) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);

@@ -19,9 +19,16 @@ class ConntrackController {
 
   async listTcpConnections(ipAddress) {
     if (!ipAddress) return [];
-    const bySource = await this.list(['-L', '-p', 'tcp', '-s', ipAddress]);
-    const byDestination = await this.list(['-L', '-p', 'tcp', '-d', ipAddress]);
+    const bySource = await this.list(['-L', '-p', 'tcp', '-s', ipAddress], 'tcp');
+    const byDestination = await this.list(['-L', '-p', 'tcp', '-d', ipAddress], 'tcp');
     return uniqueConnections([...bySource, ...byDestination]);
+  }
+
+  /** Layer 5: UDP flows are where VPN protocols (WireGuard/OpenVPN/IKEv2) live. */
+  async listUdpConnections(ipAddress) {
+    if (!ipAddress) return [];
+    const bySource = await this.list(['-L', '-p', 'udp', '-s', ipAddress], 'udp');
+    return uniqueConnections(bySource);
   }
 
   async deleteBySource(ipAddress) {
@@ -32,12 +39,12 @@ class ConntrackController {
     await this.run(['-D', '-d', ipAddress], { ignoreFailure: true });
   }
 
-  async list(args) {
+  async list(args, protocol = 'tcp') {
     const result = await this.run(args, { ignoreFailure: true, quiet: true });
     if (!result.ok) return [];
     return result.stdout
       .split(/\r?\n/)
-      .map(parseConntrackLine)
+      .map((line) => parseConntrackLine(line, protocol))
       .filter(Boolean);
   }
 
@@ -62,8 +69,8 @@ class ConntrackController {
   }
 }
 
-function parseConntrackLine(line) {
-  if (!line.includes('tcp')) return null;
+function parseConntrackLine(line, protocol = 'tcp') {
+  if (!line.includes(protocol)) return null;
   const pairs = [...line.matchAll(/\b(src|dst|sport|dport)=([^\s]+)/g)].map((match) => [match[1], match[2]]);
   if (pairs.length < 4) return null;
 
