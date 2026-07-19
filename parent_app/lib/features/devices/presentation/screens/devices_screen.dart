@@ -26,6 +26,11 @@ class DevicesScreen extends ConsumerWidget {
       appBar: GuardTimeBrandAppBar(
         actions: [
           IconButton(
+            onPressed: () => context.push('/routers'),
+            icon: const Icon(Icons.router_outlined),
+            tooltip: 'Router Integration',
+          ),
+          IconButton(
             onPressed: () => context.push('/guides'),
             icon: const Icon(Icons.library_books_outlined),
           ),

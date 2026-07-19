@@ -29,6 +29,14 @@ import 'package:parent_app/features/onboarding/presentation/screens/onboarding_s
 import 'package:parent_app/features/protection/presentation/screens/device_insights_screen.dart';
 import 'package:parent_app/features/protection/presentation/screens/protection_score_screen.dart';
 import 'package:parent_app/features/protection/presentation/screens/schedule_rules_screen.dart';
+import 'package:parent_app/features/router_integration/presentation/screens/diagnostics_screen.dart';
+import 'package:parent_app/features/router_integration/presentation/screens/gaming_devices_screen.dart';
+import 'package:parent_app/features/router_integration/presentation/screens/instant_block_screen.dart';
+import 'package:parent_app/features/router_integration/presentation/screens/one_click_setup_screen.dart';
+import 'package:parent_app/features/router_integration/presentation/screens/router_details_screen.dart';
+import 'package:parent_app/features/router_integration/presentation/screens/router_detection_screen.dart';
+import 'package:parent_app/features/router_integration/presentation/screens/router_wizard_screen.dart';
+import 'package:parent_app/features/router_integration/presentation/screens/supported_features_screen.dart';
 import 'package:parent_app/features/settings/presentation/screens/privacy_account_screen.dart';
 import 'package:parent_app/features/settings/presentation/screens/settings_screen.dart';
 import 'package:parent_app/features/sessions/presentation/screens/start_session_screen.dart';
@@ -342,6 +350,65 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _slideUpTransitionPage(
           key: state.pageKey,
           child: const NotificationsScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/routers',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: const RouterDetectionScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/routers/:gatewayId',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: RouterDetailsScreen(gatewayId: state.pathParameters['gatewayId']!),
+        ),
+      ),
+      GoRoute(
+        path: '/routers/:gatewayId/features',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: SupportedFeaturesScreen(gatewayId: state.pathParameters['gatewayId']!),
+        ),
+      ),
+      GoRoute(
+        path: '/routers/:gatewayId/setup',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: OneClickSetupScreen(gatewayId: state.pathParameters['gatewayId']!),
+        ),
+      ),
+      GoRoute(
+        path: '/routers/:gatewayId/wizard',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: RouterWizardScreen(gatewayId: state.pathParameters['gatewayId']!),
+        ),
+      ),
+      GoRoute(
+        path: '/routers/:gatewayId/gaming-devices',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: GamingDevicesScreen(gatewayId: state.pathParameters['gatewayId']!),
+        ),
+      ),
+      GoRoute(
+        path: '/routers/:gatewayId/instant-block',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: InstantBlockScreen(
+            gatewayId: state.pathParameters['gatewayId']!,
+            initialDeviceId: state.uri.queryParameters['deviceId'],
+          ),
+        ),
+      ),
+      GoRoute(
+        path: '/routers/:gatewayId/diagnostics',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: DiagnosticsScreen(gatewayId: state.pathParameters['gatewayId']!),
         ),
       ),
     ],

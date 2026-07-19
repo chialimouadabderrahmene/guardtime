@@ -29,6 +29,10 @@ function buildDeps({ devices = [], vpnDetections = [] } = {}) {
       reportDiscovery: jest.fn().mockResolvedValue({}),
       reportVpnDetections: jest.fn().mockResolvedValue({}),
     },
+    routerCommandExecutor: {
+      maybeRunDetection: jest.fn().mockResolvedValue(undefined),
+      sync: jest.fn().mockResolvedValue(undefined),
+    },
     firewall: { sync: jest.fn().mockResolvedValue(undefined) },
     connectionKiller: { sync: jest.fn().mockResolvedValue(undefined) },
     vpnDetector: { sync: jest.fn().mockResolvedValue(vpnDetections) },
@@ -160,5 +164,19 @@ describe('syncOnce', () => {
       expect(targets.some((t) => t.deviceId === 'gw-mgmt')).toBe(false);
       expect(targets.some((t) => t.deviceId === 'dev-1')).toBe(true);
     }
+  });
+
+  it('runs router detection and drains the router command queue every cycle', async () => {
+    const deps = buildDeps();
+    await syncOnce(deps);
+    expect(deps.routerCommandExecutor.maybeRunDetection).toHaveBeenCalledTimes(1);
+    expect(deps.routerCommandExecutor.sync).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs a warning (does not throw) when router command sync fails', async () => {
+    const deps = buildDeps();
+    deps.routerCommandExecutor.sync = jest.fn().mockRejectedValue(new Error('backend unreachable'));
+    await expect(syncOnce(deps)).resolves.not.toThrow();
+    expect(logger.warn).toHaveBeenCalledWith('router command sync failed', { error: 'backend unreachable' });
   });
 });

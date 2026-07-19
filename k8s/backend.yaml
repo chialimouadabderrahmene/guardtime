@@ -1,0 +1,99 @@
+# Backend (NestJS). Config comes from a Secret you create out-of-band —
+# never commit real values here:
+#   kubectl -n guardtime create secret generic backend-secrets \
+#     --from-literal=DATABASE_URL=... --from-literal=DIRECT_URL=... \
+#     --from-literal=REDIS_HOST=... --from-literal=JWT_SECRET=... \
+#     --from-literal=JWT_REFRESH_SECRET=... --from-literal=ENCRYPTION_KEY=...
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: guardtime
+  labels: { app: backend }
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0 # zero-downtime: never drop below `replicas` capacity
+  selector:
+    matchLabels: { app: backend }
+  template:
+    metadata:
+      labels: { app: backend }
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: backend
+          image: guardtime/backend:latest # replace with your registry:tag in CI
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - secretRef: { name: backend-secrets }
+          env:
+            - name: PORT
+              value: "3000"
+            - name: NODE_ENV
+              value: "production"
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 3000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 3000 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              # Give the load balancer time to stop sending new requests
+              # before Nest's shutdown hooks start draining connections.
+              exec: { command: ["sh", "-c", "sleep 5"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: guardtime
+spec:
+  selector: { app: backend }
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend
+  namespace: guardtime
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
+    - type: Resource
+      resource:
+        name: memory
+        target: { type: Utilization, averageUtilization: 80 }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend
+  namespace: guardtime
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app: backend }

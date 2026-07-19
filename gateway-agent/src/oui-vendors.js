@@ -40,6 +40,26 @@ const OUI_VENDORS = new Map([
   ['98:b6:e9', 'Nintendo'],
   ['00:04:1f', 'Sony'],
   ['ac:9b:0a', 'Sony'],
+
+  // Router Integration Engine — router-vendor OUIs (Layer 8 detection).
+  ['00:04:0e', 'AVM'],
+  ['34:31:c4', 'AVM'],
+  ['9c:c7:a6', 'AVM'],
+  ['4c:5e:0c', 'MikroTik'],
+  ['6c:3b:6b', 'MikroTik'],
+  ['48:8f:5a', 'MikroTik'],
+  ['24:a4:3c', 'Ubiquiti'],
+  ['04:18:d6', 'Ubiquiti'],
+  ['80:2a:a8', 'Ubiquiti'],
+  ['94:83:c4', 'GL.iNet'],
+  ['20:e5:2a', 'Netgear'],
+  ['a0:40:a0', 'Netgear'],
+  ['1c:87:2c', 'ASUS'],
+  ['04:d4:c4', 'ASUS'],
+  ['48:f8:b3', 'Linksys'],
+  ['c0:56:27', 'Linksys'],
+  ['14:d6:4d', 'D-Link'],
+  ['90:94:e4', 'D-Link'],
 ]);
 
 function lookupVendor(macAddress) {

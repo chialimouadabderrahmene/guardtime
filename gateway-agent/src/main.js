@@ -1,5 +1,6 @@
 'use strict';
 
+const path = require('node:path');
 const { loadConfig } = require('./config');
 const logger = require('./logger');
 const { BackendClient } = require('./backend-client');
@@ -14,7 +15,13 @@ const { ConnectionKiller } = require('./connection-killer');
 const { DnsSniffController } = require('./dns-sniff-controller');
 const { VpnDetector } = require('./vpn-detector');
 const { DnsResolveCache } = require('./dns-resolve-cache');
+const { RouterCommandExecutor } = require('./router-command-executor');
 const { Metrics } = require('./metrics');
+const { writeHeartbeat, HEARTBEAT_PATH } = require('./heartbeat');
+
+const METRICS_TEXTFILE_PATH =
+  process.env.METRICS_TEXTFILE_PATH ||
+  path.join(path.dirname(HEARTBEAT_PATH), 'gateway-agent.prom');
 
 let stopping = false;
 
@@ -31,7 +38,7 @@ function summarize(targets) {
   };
 }
 
-async function syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos, managementGuard, metrics, config }) {
+async function syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos, managementGuard, routerCommandExecutor, metrics, config }) {
   await managementGuard.refresh();
 
   const discovered = await discoverDevices(config, logger);
@@ -83,6 +90,17 @@ async function syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos,
     }
   }
 
+  // Router Integration Engine: periodic auto-detection (its own interval,
+  // independent of this poll cadence) + draining any pending router
+  // commands (instant block, DNS change, MAC filter, etc.) queued by the
+  // backend since the last cycle.
+  await routerCommandExecutor.maybeRunDetection().catch((err) => {
+    logger.warn('router detection failed', { error: err.message });
+  });
+  await routerCommandExecutor.sync().catch((err) => {
+    logger.warn('router command sync failed', { error: err.message });
+  });
+
   logger.info('gateway policy sync complete', { ...summarize(targets), metrics: metrics.flush() });
 }
 
@@ -105,6 +123,7 @@ async function main() {
   });
   const dnsSniff = new DnsSniffController(config, logger);
   const vpnDetector = new VpnDetector({ conntrack, dnsSniff, metrics, logger });
+  const routerCommandExecutor = new RouterCommandExecutor({ backend, config, logger });
 
   logger.info('GuardTime gateway-agent starting', {
     backendUrl: config.backendUrl,
@@ -118,9 +137,18 @@ async function main() {
 
   while (!stopping) {
     try {
-      await syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos, managementGuard, metrics, config });
+      await syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos, managementGuard, routerCommandExecutor, metrics, config });
+      writeHeartbeat({ ok: true, pollIntervalMs: config.pollIntervalMs });
     } catch (err) {
       logger.error('gateway policy sync failed', { error: err.message });
+      writeHeartbeat({ ok: false, error: err.message, pollIntervalMs: config.pollIntervalMs });
+    }
+    try {
+      metrics.writeTextfile(METRICS_TEXTFILE_PATH);
+    } catch (err) {
+      // Same posture as heartbeat: metrics export is best-effort monitoring,
+      // never a reason to stop enforcing policy.
+      logger.warn('failed to write metrics textfile', { error: err.message });
     }
     await sleep(config.pollIntervalMs);
   }

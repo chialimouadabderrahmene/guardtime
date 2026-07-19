@@ -1,0 +1,44 @@
+# Requires an ingress-nginx controller and cert-manager with a ClusterIssuer
+# named "letsencrypt-prod" already installed in the cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: guardtime
+  namespace: guardtime
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "2m"
+    # Edge-level rate limiting ahead of the app's own Throttler, same
+    # posture as deploy/nginx/guardtime.conf for a non-k8s deployment.
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    # /metrics and /dns/policy/check must never be reachable from the public
+    # internet (scrape-only infra / internal-only DoS-exposed endpoint — see
+    # deploy/nginx/guardtime.conf for the equivalent non-k8s rule). Scrape
+    # /metrics from inside the cluster instead, e.g. a ServiceMonitor
+    # pointed at the `backend` Service directly, bypassing this Ingress.
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      location ~ ^/(metrics|dns/policy/check) {
+        deny all;
+        return 404;
+      }
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["api.waqti.pro", "app.waqti.pro"]
+      secretName: guardtime-tls
+  rules:
+    - host: api.waqti.pro
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: backend, port: { number: 3000 } }
+    - host: app.waqti.pro
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: web-client, port: { number: 3000 } }

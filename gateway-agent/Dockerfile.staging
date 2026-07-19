@@ -1,0 +1,35 @@
+# STAGING ONLY. Production gateway-agent runs bare-metal via systemd
+# (deploy/guardtime-gateway-agent.service) because it needs direct
+# NET_ADMIN / iptables/nftables/conntrack access to the actual LAN it's
+# protecting — a container can't give it that without `--privileged` +
+# `--network host`, which throws away the isolation containers are for.
+#
+# This image exists purely so staging can include a gateway-agent in the
+# loop for end-to-end verification (does it register, poll, receive
+# commands?) without needing physical router hardware. It runs with
+# DRY_RUN=true — every firewall/nftables/iptables/conntrack/qos/tcp-rst
+# controller no-ops instead of touching the real network stack (confirmed:
+# `dryRun` is checked in all 13 of those controller modules). Never deploy
+# this image to production.
+FROM node:20-alpine
+
+WORKDIR /app
+RUN addgroup -S gwagent && adduser -S gwagent -G gwagent
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY src/ ./src/
+RUN chown -R gwagent:gwagent /app
+
+USER gwagent
+
+ENV DRY_RUN=true
+# Default heartbeat path (/var/run/...) needs root to create; point it
+# somewhere this container's unprivileged user actually owns.
+ENV HEARTBEAT_PATH=/app/.heartbeat.json
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+  CMD node src/healthcheck.js
+
+CMD ["node", "src/main.js"]

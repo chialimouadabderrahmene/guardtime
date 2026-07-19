@@ -80,7 +80,24 @@ export const sessionsApi = {
   stop: (id: string) => api.post(`/sessions/${id}/stop`, {}),
 }
 
-export const analyticsApi = {
-  overview: () => api.get('/analytics/overview'),
-  byChild: (childId: string) => api.get(`/analytics/children/${childId}`),
+export const reportsApi = {
+  weekly: (params?: { childId?: string; offset?: number }) =>
+    api.get('/reports/weekly', { params }),
+  monthly: (params?: { childId?: string; offset?: number }) =>
+    api.get('/reports/monthly', { params }),
+}
+
+export const usageApi = {
+  daily: (childId: string, date?: string) =>
+    api.get('/usage/daily', { params: { childId, date } }),
+  weekly: (childId: string) => api.get('/usage/weekly', { params: { childId } }),
+  device: (deviceId: string) => api.get(`/usage/device/${deviceId}`),
+}
+
+export const parentsApi = {
+  profile: () => api.get('/parents/profile'),
+  updateProfile: (data: { firstName?: string; lastName?: string }) =>
+    api.patch('/parents/profile', data),
+  deleteAccount: () => api.delete('/parents/profile'),
+  subscription: () => api.get('/parents/subscription'),
 }

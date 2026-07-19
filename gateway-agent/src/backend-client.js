@@ -24,6 +24,24 @@ class BackendClient {
     });
   }
 
+  async reportRouterDetection(detection) {
+    return this.request('/gateway/router/detection', {
+      method: 'POST',
+      body: JSON.stringify(detection),
+    });
+  }
+
+  async getRouterCommands() {
+    return this.request('/gateway/router-commands', { method: 'GET' });
+  }
+
+  async ackRouterCommand(commandId, success, resultData) {
+    return this.request('/gateway/router-commands/ack', {
+      method: 'POST',
+      body: JSON.stringify({ commandId, success, resultData }),
+    });
+  }
+
   async request(path, options) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);

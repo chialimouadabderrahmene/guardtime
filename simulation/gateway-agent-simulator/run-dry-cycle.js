@@ -36,6 +36,7 @@ const { ConnectionKiller } = req('connection-killer');
 const { DnsSniffController } = req('dns-sniff-controller');
 const { VpnDetector } = req('vpn-detector');
 const { DnsResolveCache } = req('dns-resolve-cache');
+const { RouterCommandExecutor } = req('router-command-executor');
 const { Metrics } = req('metrics');
 const { syncOnce } = req('main');
 
@@ -176,6 +177,17 @@ function buildFakeBackend() {
       reported.vpnDetections = detections;
       return { recorded: detections.length };
     },
+    async reportRouterDetection(detection) {
+      reported.routerDetection = detection;
+      return { updated: 0 };
+    },
+    async getRouterCommands() {
+      return { commands: [], routerConnection: null };
+    },
+    async ackRouterCommand(commandId, success, resultData) {
+      reported.routerCommandAck = { commandId, success, resultData };
+      return { acked: true };
+    },
   };
 }
 
@@ -198,6 +210,7 @@ async function runGatewayAgentDryCycle() {
   const connectionKiller = new ConnectionKiller({ conntrack, tcpReset, managementGuard, metrics, logger });
   const dnsSniff = new DnsSniffController(config, logger);
   const vpnDetector = new VpnDetector({ conntrack, dnsSniff, metrics, logger });
+  const routerCommandExecutor = new RouterCommandExecutor({ backend, config, logger });
 
   const logLines = [];
   const originalLog = console.log;
@@ -209,7 +222,7 @@ async function runGatewayAgentDryCycle() {
 
   let error = null;
   try {
-    await syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos, managementGuard, metrics, config });
+    await syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos, managementGuard, routerCommandExecutor, metrics, config });
   } catch (err) {
     error = err;
   } finally {

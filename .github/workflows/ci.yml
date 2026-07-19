@@ -1,0 +1,221 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ───────────────────────── lint ─────────────────────────
+  lint-backend:
+    name: Lint / backend
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: backend/package-lock.json }
+      - run: npm ci
+      # Check-only in CI — the local `npm run lint` script includes --fix,
+      # which is a dev convenience, not something CI should auto-apply.
+      - run: npx eslint "{src,test}/**/*.ts"
+
+  lint-web-client:
+    name: Lint / web client
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: "web port client (parent-app)" } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: "web port client (parent-app)/package-lock.json" }
+      - run: npm ci
+      - run: npm run lint
+
+  lint-gateway-agent:
+    name: Lint / gateway-agent (syntax check)
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: gateway-agent } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: gateway-agent/package-lock.json }
+      - run: npm ci
+      - run: npm run check
+
+  # ───────────────────────── tests + coverage ─────────────────────────
+  test-dns-service:
+    name: Test / dns-service
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: dns-service } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: dns-service/package-lock.json }
+      - run: npm ci
+      - run: npx jest --coverage
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with: { name: coverage-dns-service, path: dns-service/coverage/, retention-days: 14 }
+
+  test-gateway-agent:
+    name: Test / gateway-agent
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: gateway-agent } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: gateway-agent/package-lock.json }
+      - run: npm ci
+      - run: npx jest --coverage
+      - uses: actions/upload-artifact@v4
+        with: { name: coverage-gateway-agent, path: gateway-agent/coverage/, retention-days: 14 }
+
+  test-backend:
+    name: Test / backend
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: backend/package-lock.json }
+      - run: npm ci
+      - run: npx jest --coverage
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with: { name: coverage-backend, path: backend/coverage/, retention-days: 14 }
+
+  test-web-client:
+    name: Test / web client
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: "web port client (parent-app)" } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: "web port client (parent-app)/package-lock.json" }
+      - run: npm ci
+      - run: npx jest --coverage
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with: { name: coverage-web-client, path: "web port client (parent-app)/coverage/", retention-days: 14 }
+
+  test-flutter:
+    name: Test / flutter (parent_app)
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: parent_app } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable }
+      - run: flutter pub get
+      - run: flutter test --coverage
+
+  # ───────────────────────── security ─────────────────────────
+  dependency-review:
+    name: Security / dependency review (PRs only)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  npm-audit:
+    name: Security / npm audit
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [backend, dns-service, gateway-agent, "web port client (parent-app)"]
+    defaults: { run: { working-directory: "${{ matrix.service }}" } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      # Fails the build only on newly-disclosed CRITICAL advisories — the
+      # backend currently carries known high/moderate findings (tracked in
+      # the production-readiness report) whose only fix is a breaking major
+      # upgrade (@nestjs/cli 10→11, uuid major); ratchet this to
+      # --audit-level=high once that upgrade is scheduled and done.
+      - run: npm audit --audit-level=critical
+        continue-on-error: false
+
+  # ───────────────────────── docker build ─────────────────────────
+  docker-build:
+    name: Docker build / ${{ matrix.service.name }}
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-dns-service, test-web-client]
+    strategy:
+      matrix:
+        service:
+          - { name: backend, context: backend }
+          - { name: dns-service, context: dns-service }
+          - { name: web-client, context: "web port client (parent-app)" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (no push on PRs)
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.service.context }}
+          push: false
+          tags: guardtime/${{ matrix.service.name }}:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ───────────────────────── release (tags only) ─────────────────────────
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-dns-service, test-gateway-agent, test-web-client, npm-audit, docker-build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push tagged images
+        run: |
+          for svc in backend:backend dns-service:dns-service "web port client (parent-app):web-client"; do
+            ctx="${svc%%:*}"; name="${svc##*:}"
+            docker buildx build --push \
+              -t "ghcr.io/${{ github.repository }}/${name}:${GITHUB_REF_NAME}" \
+              -t "ghcr.io/${{ github.repository }}/${name}:latest" \
+              "$ctx"
+          done
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+
+  # ───────────────────────── deploy (template — fill in your target) ─────
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: production # requires manual approval if you configure
+                             # required reviewers on this environment
+    steps:
+      - name: Deploy
+        run: |
+          echo "TEMPLATE — wire this up to your real target before relying on it."
+          echo "Typical options:"
+          echo "  kubectl set image deployment/backend backend=ghcr.io/${{ github.repository }}/backend:${GITHUB_REF_NAME} -n guardtime"
+          echo "  kubectl rollout status deployment/backend -n guardtime"
+          echo "or an SSH+docker-compose pull/up on a single VPS, or a Railway/Fly deploy hook."
+          exit 0

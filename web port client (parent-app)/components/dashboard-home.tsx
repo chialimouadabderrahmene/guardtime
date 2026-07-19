@@ -18,6 +18,25 @@ import {
   Loader2
 } from 'lucide-react'
 
+interface ActivityEvent {
+  at: string
+  child: string
+  action: string
+  icon: typeof Play
+  color: string
+}
+
+function formatRelativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const minutes = Math.max(0, Math.round(diffMs / 60000))
+  if (minutes < 1) return "à l'instant"
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} h`
+  const days = Math.round(hours / 24)
+  return `${days} j`
+}
+
 export default function DashboardHome() {
   const user = useAuthStore((state) => state.user)
 
@@ -60,11 +79,26 @@ export default function DashboardHome() {
     { label: 'Alertes', value: '0', icon: AlertTriangle, color: 'bg-orange-50 text-orange-600' },
   ]
 
-  // Mocking recent activity since we don't have a dedicated endpoint right now
-  const recentActivity = [
-    { type: 'session', child: children[0]?.name || 'Enfant', action: 'Session démarrée', time: '10 min', icon: Play, color: 'text-at-green' },
-    { type: 'device', child: children[0]?.name || 'Enfant', action: 'Appareil connecté', time: '2h', icon: Smartphone, color: 'text-purple-500' },
-  ]
+  // Built from real session data already fetched above — no separate
+  // activity-feed endpoint exists, so this derives events from session
+  // start/stop timestamps instead of showing placeholder data.
+  const recentActivity: (ActivityEvent & { time: string })[] = sessions
+    .flatMap((session: any): ActivityEvent[] => {
+      const child = children.find((c: any) => c.id === session.childId)
+      const device = devices.find((d: any) => d.id === session.deviceId)
+      const label = `${child?.name || 'Enfant'} · ${device?.name || 'Appareil'}`
+      const events: ActivityEvent[] = []
+      if (session.startedAt) {
+        events.push({ at: session.startedAt, child: label, action: 'Session démarrée', icon: Play, color: 'text-at-green' })
+      }
+      if (session.stoppedAt) {
+        events.push({ at: session.stoppedAt, child: label, action: 'Session arrêtée', icon: Pause, color: 'text-gray-500' })
+      }
+      return events
+    })
+    .sort((a: ActivityEvent, b: ActivityEvent) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    .slice(0, 5)
+    .map((event: ActivityEvent) => ({ ...event, time: formatRelativeTime(event.at) }))
 
   return (
     <div className="space-y-6">
@@ -191,7 +225,11 @@ export default function DashboardHome() {
             <TrendingUp className="w-5 h-5 text-gray-400" />
           </div>
           <div className="space-y-4">
-            {recentActivity.map((activity, i) => (
+            {recentActivity.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-sm">
+                Aucune activité récente.
+              </div>
+            ) : recentActivity.map((activity, i) => (
               <motion.div
                 key={i}
                 initial={{ opacity: 0, x: 10 }}

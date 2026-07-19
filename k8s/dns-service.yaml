@@ -1,0 +1,73 @@
+# DNS service. NOTE on fit: this resolver is meant to be the fixed DNS
+# target a home router points at (a stable IP), which sits awkwardly with
+# an elastic Kubernetes Service — most real deployments will keep this on a
+# static VPS (as the code's own comments assume: "co-located with the
+# backend on the same VPS"). This manifest is provided for completeness and
+# works for a single-region cluster with a cloud LB that supports UDP
+# (AWS NLB, GCP, MetalLB); verify your provider before relying on it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dns-service
+  namespace: guardtime
+  labels: { app: dns-service }
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels: { app: dns-service }
+  template:
+    metadata:
+      labels: { app: dns-service }
+    spec:
+      terminationGracePeriodSeconds: 15
+      containers:
+        - name: dns-service
+          image: guardtime/dns-service:latest
+          ports:
+            - containerPort: 53
+              protocol: UDP
+            - containerPort: 53
+              protocol: TCP
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: BACKEND_URL
+              value: "http://backend.guardtime.svc.cluster.local:3000"
+            - name: UPSTREAM_DNS
+              value: "1.1.1.1,8.8.8.8"
+            - name: DNS_PORT
+              value: "53"
+            - name: HEALTH_PORT
+              value: "8080"
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dns-service
+  namespace: guardtime
+spec:
+  type: LoadBalancer # requires a UDP-capable load balancer — see note above
+  selector: { app: dns-service }
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: 53
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: 53
+      protocol: TCP

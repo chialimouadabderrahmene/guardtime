@@ -1,0 +1,37 @@
+name: Rollback
+
+# Manually re-deploys a previously released image tag. Run from the Actions
+# tab: Actions → Rollback → Run workflow → enter the tag to roll back to
+# (e.g. v1.2.3). This is a TEMPLATE — the deploy step needs to be wired to
+# your real target, same as the `deploy` job in ci.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to roll back to (e.g. v1.2.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    name: Roll back to ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Verify the target tag's images actually exist before rolling back
+        run: |
+          for name in backend dns-service web-client; do
+            docker manifest inspect "ghcr.io/${{ github.repository }}/${name}:${{ inputs.tag }}" > /dev/null \
+              || { echo "::error::ghcr.io/${{ github.repository }}/${name}:${{ inputs.tag }} not found — aborting"; exit 1; }
+          done
+      - name: Roll back
+        run: |
+          echo "TEMPLATE — wire this to your real deploy target."
+          echo "  kubectl set image deployment/backend backend=ghcr.io/${{ github.repository }}/backend:${{ inputs.tag }} -n guardtime"
+          echo "  kubectl rollout status deployment/backend -n guardtime"
+          echo "  kubectl set image deployment/dns-service dns-service=ghcr.io/${{ github.repository }}/dns-service:${{ inputs.tag }} -n guardtime"
+          echo "  kubectl set image deployment/web-client web-client=ghcr.io/${{ github.repository }}/web-client:${{ inputs.tag }} -n guardtime"

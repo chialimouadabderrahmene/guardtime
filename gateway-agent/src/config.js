@@ -107,6 +107,14 @@ function loadConfig() {
     enableOsHint: bool('ENABLE_OS_HINT', false),
     pingBin: process.env.PING_BIN || 'ping',
     osHintTimeoutMs: int('OS_HINT_TIMEOUT_MS', 1000),
+
+    // Router Integration Engine: automatic router detection. On by default
+    // — read-only (SSDP/mDNS/HTTP-header probes, no login attempted) so it
+    // is safe to run every cycle; only reports findings, never acts on them.
+    enableRouterDetection: bool('ENABLE_ROUTER_DETECTION', true),
+    routerDetectionIntervalMs: int('ROUTER_DETECTION_INTERVAL_MS', 300000),
+    routerSsdpTimeoutMs: int('ROUTER_SSDP_TIMEOUT_MS', 1500),
+    routerMdnsTimeoutMs: int('ROUTER_MDNS_TIMEOUT_MS', 1200),
   };
 
   if (!config.gatewayToken) {
