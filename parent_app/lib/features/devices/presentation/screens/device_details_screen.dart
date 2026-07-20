@@ -7,6 +7,7 @@ import 'package:parent_app/core/theme/app_spacing.dart';
 import 'package:parent_app/core/utils/device_utils.dart';
 import 'package:parent_app/core/widgets/action_grid.dart';
 import 'package:parent_app/core/widgets/app_list_tile.dart';
+import 'package:parent_app/core/widgets/app_snackbar.dart';
 import 'package:parent_app/core/widgets/brand_app_bar.dart';
 import 'package:parent_app/core/widgets/error_state_view.dart';
 import 'package:parent_app/core/widgets/glass_card.dart';
@@ -44,12 +45,143 @@ class DeviceDetailsScreen extends ConsumerWidget {
     ref.invalidate(devicesListProvider);
   }
 
+  Future<void> _renameDevice(
+    BuildContext context,
+    WidgetRef ref,
+    String currentName,
+  ) async {
+    final controller = TextEditingController(text: currentName);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Rename device'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Device name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    if (newName == null || newName.isEmpty || newName == currentName) return;
+    if (!context.mounted) return;
+
+    try {
+      await ref.read(devicesRepositoryProvider).updateDevice(deviceId, name: newName);
+      ref.invalidate(deviceDetailsProvider(deviceId));
+      ref.invalidate(devicesListProvider);
+      if (context.mounted) {
+        showAppSnackbar(context, 'Device renamed', type: SnackbarType.success);
+      }
+    } catch (error) {
+      if (context.mounted) {
+        showAppSnackbar(context, error.toString(), type: SnackbarType.error);
+      }
+    }
+  }
+
+  Future<void> _deleteDevice(
+    BuildContext context,
+    WidgetRef ref,
+    String deviceName,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete device?'),
+        content: Text(
+          'This removes "$deviceName" and its protection history. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    if (!context.mounted) return;
+
+    try {
+      await ref.read(devicesRepositoryProvider).deleteDevice(deviceId);
+      ref.invalidate(devicesListProvider);
+      if (context.mounted) {
+        showAppSnackbar(context, 'Device deleted', type: SnackbarType.success);
+        context.go('/devices');
+      }
+    } catch (error) {
+      if (context.mounted) {
+        showAppSnackbar(context, error.toString(), type: SnackbarType.error);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final deviceAsync = ref.watch(deviceDetailsProvider(deviceId));
+    final loadedDevice = deviceAsync.valueOrNull;
 
     return GuardTimeScaffold(
-      appBar: const GuardTimeBrandAppBar(showBack: true),
+      appBar: GuardTimeBrandAppBar(
+        showBack: true,
+        actions: [
+          if (loadedDevice != null)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert_rounded),
+              onSelected: (value) {
+                if (value == 'rename') {
+                  _renameDevice(context, ref, loadedDevice.name);
+                } else if (value == 'delete') {
+                  _deleteDevice(context, ref, loadedDevice.name);
+                }
+              },
+              itemBuilder: (menuContext) => [
+                const PopupMenuItem(
+                  value: 'rename',
+                  child: ListTile(
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('Rename'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: ListTile(
+                    leading: Icon(
+                      Icons.delete_outline_rounded,
+                      color: Theme.of(menuContext).colorScheme.error,
+                    ),
+                    title: Text(
+                      'Delete',
+                      style: TextStyle(color: Theme.of(menuContext).colorScheme.error),
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
       child: deviceAsync.when(
         loading: () => const LoadingStateView(message: 'Loading device details...'),
         error: (error, _) => ErrorStateView(

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -14,11 +16,51 @@ import 'package:parent_app/core/widgets/loading_state_view.dart' show ShimmerCar
 import 'package:parent_app/core/widgets/section_header.dart';
 import 'package:parent_app/features/devices/presentation/providers/devices_providers.dart';
 
-class DevicesScreen extends ConsumerWidget {
+class DevicesScreen extends ConsumerStatefulWidget {
   const DevicesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DevicesScreen> createState() => _DevicesScreenState();
+}
+
+/// `devicesListProvider` is a plain (non-autoDispose) FutureProvider, and
+/// this screen lives inside a `StatefulShellRoute.indexedStack` branch, so
+/// switching tabs never disposes or re-fetches it — the list can go stale
+/// indefinitely with only pull-to-refresh as an escape hatch. A periodic
+/// background refresh (silent — `ref.invalidate` doesn't flip the provider
+/// back to a loading state for existing subscribers with cached data) plus
+/// a refresh on app foreground keeps it honestly current without user action.
+class _DevicesScreenState extends ConsumerState<DevicesScreen>
+    with WidgetsBindingObserver {
+  Timer? _refreshTimer;
+  static const _refreshInterval = Duration(seconds: 20);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refreshTimer = Timer.periodic(
+      _refreshInterval,
+      (_) => ref.invalidate(devicesListProvider),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ref.invalidate(devicesListProvider);
+    }
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final devicesAsync = ref.watch(devicesListProvider);
     final scheme = context.scheme;
 
