@@ -36,7 +36,6 @@ class DevicesRepository {
     required String type,
     required String controlMethod,
     String? platform,
-    String? ipAddress,
   }) async {
     final data =
         await _apiClient.post(
@@ -46,7 +45,6 @@ class DevicesRepository {
                 'name': name,
                 'type': type,
                 'platform': platform,
-                'ipAddress': ipAddress,
                 'controlMethod': controlMethod,
               }..removeWhere((key, value) => value == null || value == ''),
             )
@@ -58,7 +56,6 @@ class DevicesRepository {
     String deviceId, {
     String? name,
     String? childId,
-    String? ipAddress,
     String? controlMethod,
   }) async {
     final data =
@@ -67,7 +64,6 @@ class DevicesRepository {
               data: {
                 'name': name,
                 'childId': childId,
-                'ipAddress': ipAddress,
                 'controlMethod': controlMethod,
               }..removeWhere((key, value) => value == null || value == ''),
             )

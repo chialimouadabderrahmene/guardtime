@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:parent_app/core/config/app_config.dart';
+import 'package:parent_app/core/theme/app_colors.dart';
 import 'package:parent_app/core/theme/app_spacing.dart';
 import 'package:parent_app/core/utils/device_utils.dart';
 import 'package:parent_app/core/widgets/app_snackbar.dart';
@@ -53,14 +53,11 @@ class _AddDeviceScreenState extends ConsumerState<AddDeviceScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _platformController = TextEditingController();
-  final _ipController = TextEditingController();
 
   String? _selectedChildId;
-  String? _createdDeviceId;
   String _selectedType = 'PLAYSTATION';
   String _selectedControlMethod = 'DNS_FILTERING';
   bool _saving = false;
-  bool _testingDns = false;
 
   @override
   void initState() {
@@ -72,7 +69,6 @@ class _AddDeviceScreenState extends ConsumerState<AddDeviceScreen> {
   void dispose() {
     _nameController.dispose();
     _platformController.dispose();
-    _ipController.dispose();
     super.dispose();
   }
 
@@ -111,12 +107,14 @@ class _AddDeviceScreenState extends ConsumerState<AddDeviceScreen> {
             platform: _platformController.text.trim().isEmpty
                 ? deviceLabel(_selectedType)
                 : _platformController.text.trim(),
-            ipAddress: _ipController.text.trim(),
           );
       ref.invalidate(devicesListProvider);
       ref.invalidate(childrenListProvider);
       if (mounted) {
-        setState(() => _createdDeviceId = device.id);
+        context.pushReplacement(
+          '/devices/${device.id}/pair-setup',
+          extra: device.name,
+        );
       }
     } catch (error) {
       if (mounted) {
@@ -125,20 +123,6 @@ class _AddDeviceScreenState extends ConsumerState<AddDeviceScreen> {
     } finally {
       if (mounted) {
         setState(() => _saving = false);
-      }
-    }
-  }
-
-  Future<void> _testDnsConnection() async {
-    if (_createdDeviceId == null) return;
-    setState(() => _testingDns = true);
-    ref.invalidate(networkStatusProvider(_createdDeviceId!));
-    ref.invalidate(deviceDetailsProvider(_createdDeviceId!));
-    try {
-      await ref.read(networkStatusProvider(_createdDeviceId!).future);
-    } finally {
-      if (mounted) {
-        setState(() => _testingDns = false);
       }
     }
   }
@@ -156,82 +140,34 @@ class _AddDeviceScreenState extends ConsumerState<AddDeviceScreen> {
           onRetry: () => ref.invalidate(childrenListProvider),
         ),
         data: (children) {
-          if (_createdDeviceId == null) {
-            return Form(
-              key: _formKey,
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.page,
-                  AppSpacing.space12,
-                  AppSpacing.page,
-                  48,
-                ),
-                children: [
-                  _RegistrationForm(
-                    children: children,
-                    selectedChildId: _selectedChildId,
-                    onChildChanged: (v) => setState(() => _selectedChildId = v),
-                    nameController: _nameController,
-                    selectedType: _selectedType,
-                    onTypeChanged: _syncRecommendedMethod,
-                    platformController: _platformController,
-                    ipController: _ipController,
-                    selectedControlMethod: _selectedControlMethod,
-                    onControlMethodChanged: (v) =>
-                        setState(() => _selectedControlMethod = v),
-                    saving: _saving,
-                    onSubmit: _createDevice,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  const _DnsSetupTargetCard(),
-                ],
+          return Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.page,
+                AppSpacing.space12,
+                AppSpacing.page,
+                48,
               ),
-            );
-          }
-
-          final createdDeviceAsync = ref.watch(deviceDetailsProvider(_createdDeviceId!));
-          final networkAsync = ref.watch(networkStatusProvider(_createdDeviceId!));
-
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.page,
-              AppSpacing.space12,
-              AppSpacing.page,
-              48,
+              children: [
+                _RegistrationForm(
+                  children: children,
+                  selectedChildId: _selectedChildId,
+                  onChildChanged: (v) => setState(() => _selectedChildId = v),
+                  nameController: _nameController,
+                  selectedType: _selectedType,
+                  onTypeChanged: _syncRecommendedMethod,
+                  platformController: _platformController,
+                  selectedControlMethod: _selectedControlMethod,
+                  onControlMethodChanged: (v) =>
+                      setState(() => _selectedControlMethod = v),
+                  saving: _saving,
+                  onSubmit: _createDevice,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                const _AutoPairingNoticeCard(),
+              ],
             ),
-            children: [
-              createdDeviceAsync.when(
-                loading: () => const LoadingStateView(message: 'Preparing DNS setup...'),
-                error: (error, _) => ErrorStateView(
-                  message: error.toString(),
-                  onRetry: () => ref.invalidate(deviceDetailsProvider(_createdDeviceId!)),
-                ),
-                data: (device) => _DeviceCreatedCard(deviceName: device.name),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              networkAsync.when(
-                loading: () => const LoadingStateView(
-                  message: 'Checking DNS connection...',
-                  compact: true,
-                ),
-                error: (error, _) => ErrorStateView(
-                  message: error.toString(),
-                  onRetry: _testDnsConnection,
-                ),
-                data: (network) => _DnsTestCard(
-                  connected: network.dnsConnected,
-                  note: network.note,
-                  lastSeenAt: network.lastDnsSeenAt,
-                  testing: _testingDns,
-                  onTest: _testDnsConnection,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              _NextStepsCard(
-                onOpenGuide: () => context.push('/devices/$_createdDeviceId/dns-guide'),
-                onFinish: () => context.go('/devices/$_createdDeviceId'),
-              ),
-            ],
           );
         },
       ),
@@ -248,7 +184,6 @@ class _RegistrationForm extends StatelessWidget {
     required this.selectedType,
     required this.onTypeChanged,
     required this.platformController,
-    required this.ipController,
     required this.selectedControlMethod,
     required this.onControlMethodChanged,
     required this.saving,
@@ -262,7 +197,6 @@ class _RegistrationForm extends StatelessWidget {
   final String selectedType;
   final ValueChanged<String> onTypeChanged;
   final TextEditingController platformController;
-  final TextEditingController ipController;
   final String selectedControlMethod;
   final ValueChanged<String> onControlMethodChanged;
   final bool saving;
@@ -321,14 +255,6 @@ class _RegistrationForm extends StatelessWidget {
             prefixIcon: Icons.category_outlined,
           ),
           const SizedBox(height: AppSpacing.md),
-          GuardTimeTextField(
-            controller: ipController,
-            label: 'DNS source / local IP (optional)',
-            hint: '192.168.1.45',
-            keyboardType: TextInputType.number,
-            prefixIcon: Icons.lan_outlined,
-          ),
-          const SizedBox(height: AppSpacing.md),
           DropdownButtonFormField<String>(
             initialValue: selectedControlMethod,
             decoration: const InputDecoration(labelText: 'Control method'),
@@ -347,130 +273,29 @@ class _RegistrationForm extends StatelessWidget {
   }
 }
 
-class _DnsSetupTargetCard extends StatelessWidget {
-  const _DnsSetupTargetCard();
+class _AutoPairingNoticeCard extends StatelessWidget {
+  const _AutoPairingNoticeCard();
 
   @override
   Widget build(BuildContext context) {
     return GlassCard(
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('DNS setup target', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: AppSpacing.space8),
-          SelectableText(
-            AppConfig.dnsResolverIp,
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
-          const SizedBox(height: AppSpacing.space8),
-          Text(
-            'After the device is created we will show the setup steps and let you test the DNS connection.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DeviceCreatedCard extends StatelessWidget {
-  const _DeviceCreatedCard({required this.deviceName});
-
-  final String deviceName;
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Device created', style: Theme.of(context).textTheme.headlineMedium),
-          const SizedBox(height: AppSpacing.space8),
-          Text(
-            'Set $deviceName to use GuardTime DNS, then test the connection below.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          SelectableText(
-            AppConfig.dnsResolverIp,
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
-          const SizedBox(height: AppSpacing.space8),
-          Text(
-            'Use this DNS IP for Xbox, PlayStation, Nintendo, Smart TV, PC, and router setups.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DnsTestCard extends StatelessWidget {
-  const _DnsTestCard({
-    required this.connected,
-    required this.note,
-    required this.lastSeenAt,
-    required this.testing,
-    required this.onTest,
-  });
-
-  final bool connected;
-  final String note;
-  final DateTime? lastSeenAt;
-  final bool testing;
-  final VoidCallback onTest;
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            connected ? 'DNS Connected' : 'DNS not seen yet',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: AppSpacing.space8),
-          Text(note, style: Theme.of(context).textTheme.bodyMedium),
-          const SizedBox(height: AppSpacing.space12),
-          Text(
-            'Last DNS heartbeat: ${lastSeenAt?.toLocal().toString() ?? 'No heartbeat yet'}',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: AppSpacing.space16),
-          GradientButton(label: 'Test DNS Connection', onPressed: onTest, isBusy: testing),
-        ],
-      ),
-    );
-  }
-}
-
-class _NextStepsCard extends StatelessWidget {
-  const _NextStepsCard({required this.onOpenGuide, required this.onFinish});
-
-  final VoidCallback onOpenGuide;
-  final VoidCallback onFinish;
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Next steps', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: AppSpacing.space8),
-          Text(
-            '1. Open the DNS guide for this device type.\n2. Point DNS to ${AppConfig.dnsResolverIp}.\n3. Run the DNS connection test.\n4. Finish setup and review protection status.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          GradientButton(label: 'Open DNS Guide', onPressed: onOpenGuide),
-          const SizedBox(height: AppSpacing.md),
-          SecondaryGlassButton(
-            label: 'Finish Setup',
-            onPressed: onFinish,
-            icon: const Icon(Icons.arrow_forward_rounded),
+          Icon(Icons.auto_awesome_rounded, color: context.scheme.primary),
+          const SizedBox(width: AppSpacing.space12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Automatic pairing', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: AppSpacing.space4),
+                Text(
+                  'No IP address needed. After creating the device, GuardTime walks you through a QR-code DNS setup and pairs it automatically.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+            ),
           ),
         ],
       ),

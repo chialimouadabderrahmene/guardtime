@@ -26,6 +26,7 @@ import 'package:parent_app/features/notifications/presentation/screens/notificat
 import 'package:parent_app/features/offline_control/presentation/screens/offline_checklist_screen.dart';
 import 'package:parent_app/features/offline_control/presentation/screens/offline_control_guide_screen.dart';
 import 'package:parent_app/features/onboarding/presentation/screens/onboarding_screen.dart';
+import 'package:parent_app/features/pairing/presentation/screens/pairing_wizard_screen.dart';
 import 'package:parent_app/features/protection/presentation/screens/device_insights_screen.dart';
 import 'package:parent_app/features/protection/presentation/screens/protection_score_screen.dart';
 import 'package:parent_app/features/protection/presentation/screens/schedule_rules_screen.dart';
@@ -267,6 +268,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           key: state.pageKey,
           child: DnsSetupGuideScreen(
             deviceId: state.pathParameters['deviceId']!,
+          ),
+        ),
+      ),
+      GoRoute(
+        path: '/devices/:deviceId/pair-setup',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: PairingWizardScreen(
+            deviceId: state.pathParameters['deviceId']!,
+            deviceName: (state.extra as String?) ?? 'this device',
           ),
         ),
       ),

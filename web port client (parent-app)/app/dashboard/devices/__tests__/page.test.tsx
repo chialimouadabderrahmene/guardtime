@@ -1,12 +1,13 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import DevicesPage from '../page';
-import { devicesApi, childrenApi } from '@/lib/api';
+import { devicesApi, childrenApi, pairingApi } from '@/lib/api';
 import { renderWithQueryClient } from '../../../../test-utils/query-client';
 
 jest.mock('@/lib/api', () => ({
   devicesApi: { list: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
   childrenApi: { list: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
+  pairingApi: { start: jest.fn(), status: jest.fn(), stats: jest.fn(), cancel: jest.fn() },
 }));
 
 const toastSuccess = jest.fn();
@@ -115,6 +116,42 @@ describe('DevicesPage', () => {
       }),
     );
     expect(toastSuccess).toHaveBeenCalledWith('Appareil ajouté');
+  });
+
+  it('shows a "pairing pending" badge for an unpaired device and lets a parent start pairing', async () => {
+    (devicesApi.list as jest.Mock).mockResolvedValue({ data: [sampleDevice] });
+    (pairingApi.start as jest.Mock).mockResolvedValue({
+      data: { dnsServer: '169.58.30.9', token: 'abc-123', expiresAt: new Date().toISOString() },
+    });
+    const user = userEvent.setup();
+    renderWithQueryClient(<DevicesPage />);
+
+    await screen.findByText('iPad de Lucas');
+    expect(screen.getByText('Jumelage en attente')).toBeInTheDocument();
+
+    await user.click(screen.getByText('Jumeler'));
+
+    await waitFor(() => expect(pairingApi.start).toHaveBeenCalledWith('d1'));
+    expect(await screen.findByText('169.58.30.9')).toBeInTheDocument();
+    expect(screen.getByText('abc-123')).toBeInTheDocument();
+  });
+
+  it('shows a "paired" badge and connection details for a paired device, with no pairing button', async () => {
+    const pairedDevice = {
+      ...sampleDevice,
+      paired: true,
+      pairStatus: 'PAIRED',
+      publicIp: '203.0.113.5',
+      lastDnsSeenAt: new Date().toISOString(),
+    };
+    (devicesApi.list as jest.Mock).mockResolvedValue({ data: [pairedDevice] });
+    renderWithQueryClient(<DevicesPage />);
+
+    await screen.findByText('iPad de Lucas');
+    expect(screen.getByText('Jumelé')).toBeInTheDocument();
+    expect(screen.getByText('203.0.113.5')).toBeInTheDocument();
+    expect(screen.getByText('Excellente')).toBeInTheDocument();
+    expect(screen.queryByText('Jumeler')).not.toBeInTheDocument();
   });
 
   it('shows an API error message when device creation fails', async () => {

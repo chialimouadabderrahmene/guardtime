@@ -21,6 +21,10 @@ class DeviceModel {
     required this.offlineControlMethod,
     required this.recommendedControlMethod,
     required this.supportNotes,
+    required this.paired,
+    required this.pairStatus,
+    required this.publicIp,
+    required this.resolverRegion,
     this.childId,
     this.childName,
   });
@@ -45,6 +49,10 @@ class DeviceModel {
   final String? offlineControlMethod;
   final String? recommendedControlMethod;
   final String? supportNotes;
+  final bool paired;
+  final String pairStatus;
+  final String? publicIp;
+  final String? resolverRegion;
 
   bool get dnsConnected {
     if (lastDnsSeenAt == null) {
@@ -80,6 +88,10 @@ class DeviceModel {
       offlineControlMethod: json['offlineControlMethod'] as String?,
       recommendedControlMethod: json['recommendedControlMethod'] as String?,
       supportNotes: json['supportNotes'] as String?,
+      paired: json['paired'] as bool? ?? false,
+      pairStatus: json['pairStatus'] as String? ?? 'WAITING',
+      publicIp: json['publicIp'] as String?,
+      resolverRegion: json['resolverRegion'] as String?,
     );
   }
 }

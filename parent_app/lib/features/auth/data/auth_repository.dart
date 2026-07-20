@@ -143,7 +143,6 @@ class AuthRepository {
           'password': password,
           'firstName': firstName,
           'lastName': lastName,
-          'role': 'PARENT',
         },
       );
       return AppSession.fromJson(response.data as Map<String, dynamic>);

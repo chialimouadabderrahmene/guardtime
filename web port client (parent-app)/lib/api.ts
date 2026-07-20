@@ -74,6 +74,13 @@ export const devicesApi = {
   delete: (id: string) => api.delete(`/devices/${id}`),
 }
 
+export const pairingApi = {
+  start: (deviceId: string) => api.post(`/devices/${deviceId}/pair/start`),
+  status: (deviceId: string) => api.get(`/devices/${deviceId}/pair/status`),
+  stats: (deviceId: string) => api.get(`/devices/${deviceId}/pair/stats`),
+  cancel: (deviceId: string) => api.delete(`/devices/${deviceId}/pair`),
+}
+
 export const sessionsApi = {
   list: () => api.get('/sessions'),
   start: (data: any) => api.post('/sessions/start', data),

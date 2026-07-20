@@ -8,6 +8,7 @@ import 'package:parent_app/core/widgets/brand_mark.dart';
 import 'package:parent_app/core/widgets/gradient_button.dart';
 import 'package:parent_app/core/widgets/guardtime_scaffold.dart';
 import 'package:parent_app/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:parent_app/features/onboarding/presentation/widgets/onboarding_illustrations.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
@@ -22,22 +23,22 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   static const _pages = [
     _OnboardingPageData(
-      title: 'Device Control',
+      title: 'See What Matters',
       body:
-          'Add consoles, TVs, tablets, and phones. See what can be controlled online and where vendor parental tools are needed.',
-      icon: Icons.devices_rounded,
+          'Add consoles, TVs, tablets, and phones, then watch weekly activity roll in — what can be controlled online, and where vendor parental tools are needed.',
+      illustration: WeeklyActivityIllustration(),
     ),
     _OnboardingPageData(
-      title: 'Time Limits',
+      title: 'Manage Screen Time',
       body:
           'Start sessions, set bedtime rules, and give extra time when it makes sense. Limits stay tied to each device.',
-      icon: Icons.timer_outlined,
+      illustration: ScreenTimeRingIllustration(),
     ),
     _OnboardingPageData(
-      title: 'Smart Blocking',
+      title: 'Protect Every Connection',
       body:
-          'Pause gaming with internet lock, monitor DNS health, and get honest offline-control insights.',
-      icon: Icons.shield_rounded,
+          'Pause gaming with internet lock, monitor DNS health, and get honest offline-control insights across every device.',
+      illustration: ProtectionShieldIllustration(),
     ),
   ];
 
@@ -58,19 +59,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   Widget build(BuildContext context) {
     final isLast = _page == _pages.length - 1;
     final scheme = context.scheme;
-    final gradients = [
-      context.colors.brandGradient,
-      LinearGradient(
-        colors: [scheme.secondary, scheme.primary],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
-      LinearGradient(
-        colors: [scheme.primary, scheme.tertiary],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
-    ];
 
     return GuardTimeScaffold(
       child: SafeArea(
@@ -109,29 +97,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                   onPageChanged: (value) => setState(() => _page = value),
                   itemBuilder: (context, index) {
                     final page = _pages[index];
-                    final gradient = gradients[index];
                     return Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Container(
-                              width: 140,
-                              height: 140,
-                              decoration: BoxDecoration(
-                                gradient: gradient,
-                                borderRadius: BorderRadius.circular(40),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: scheme.primary.withValues(alpha: 0.3),
-                                    blurRadius: 40,
-                                    offset: const Offset(0, 16),
-                                  ),
-                                ],
-                              ),
-                              child: Icon(page.icon, color: Colors.white, size: 64),
-                            )
-                            .animate(key: ValueKey('icon_$index'))
+                        page.illustration
+                            .animate(key: ValueKey('illustration_$index'))
                             .scale(
-                              begin: const Offset(0.8, 0.8),
+                              begin: const Offset(0.9, 0.9),
                               end: const Offset(1.0, 1.0),
                               duration: 400.ms,
                               curve: Curves.easeOutBack,
@@ -209,10 +181,10 @@ class _OnboardingPageData {
   const _OnboardingPageData({
     required this.title,
     required this.body,
-    required this.icon,
+    required this.illustration,
   });
 
   final String title;
   final String body;
-  final IconData icon;
+  final Widget illustration;
 }

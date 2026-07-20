@@ -12,13 +12,14 @@ metadata:
     # Edge-level rate limiting ahead of the app's own Throttler, same
     # posture as deploy/nginx/guardtime.conf for a non-k8s deployment.
     nginx.ingress.kubernetes.io/limit-rps: "20"
-    # /metrics and /dns/policy/check must never be reachable from the public
-    # internet (scrape-only infra / internal-only DoS-exposed endpoint — see
-    # deploy/nginx/guardtime.conf for the equivalent non-k8s rule). Scrape
-    # /metrics from inside the cluster instead, e.g. a ServiceMonitor
-    # pointed at the `backend` Service directly, bypassing this Ingress.
+    # /metrics, /dns/policy/check, and /dns/pair/confirm must never be
+    # reachable from the public internet (scrape-only infra / internal-only
+    # DoS-exposed endpoints — see deploy/nginx/guardtime.conf for the
+    # equivalent non-k8s rule). Scrape /metrics from inside the cluster
+    # instead, e.g. a ServiceMonitor pointed at the `backend` Service
+    # directly, bypassing this Ingress.
     nginx.ingress.kubernetes.io/configuration-snippet: |
-      location ~ ^/(metrics|dns/policy/check) {
+      location ~ ^/(metrics|dns/policy/check|dns/pair/confirm) {
         deny all;
         return 404;
       }

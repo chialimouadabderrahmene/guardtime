@@ -20,6 +20,8 @@ import 'package:parent_app/features/devices/data/devices_repository.dart';
 import 'package:parent_app/features/devices/domain/device_model.dart';
 import 'package:parent_app/features/devices/domain/network_status_model.dart';
 import 'package:parent_app/features/devices/presentation/providers/devices_providers.dart';
+import 'package:parent_app/features/pairing/domain/pairing_models.dart';
+import 'package:parent_app/features/pairing/presentation/providers/pairing_providers.dart';
 import 'package:parent_app/features/sessions/presentation/providers/session_providers.dart';
 import 'package:parent_app/shared/constants/disclaimers.dart';
 import 'package:parent_app/shared/widgets/info_notice_card.dart';
@@ -58,6 +60,7 @@ class DeviceDetailsScreen extends ConsumerWidget {
           final usageAsync = ref.watch(deviceUsageProvider(deviceId));
           final networkAsync = ref.watch(networkStatusProvider(deviceId));
           final sessionsAsync = ref.watch(activeSessionsProvider);
+          final connectionStatsAsync = ref.watch(connectionStatsProvider(deviceId));
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(
@@ -68,6 +71,33 @@ class DeviceDetailsScreen extends ConsumerWidget {
             ),
             children: [
               _DeviceHeaderCard(device: device),
+              const SizedBox(height: AppSpacing.xl),
+              SectionHeader(
+                title: 'Connection',
+                actionLabel: device.paired ? null : 'Finish setup',
+                onAction: device.paired
+                    ? null
+                    : () => context.push(
+                        '/devices/$deviceId/pair-setup',
+                        extra: device.name,
+                      ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              connectionStatsAsync.when(
+                loading: () => const LoadingStateView(
+                  message: 'Loading connection status...',
+                  compact: true,
+                ),
+                error: (error, _) => Text(error.toString()),
+                data: (stats) => _ConnectionStatusCard(
+                  device: device,
+                  stats: stats,
+                  onFinishPairing: () => context.push(
+                    '/devices/$deviceId/pair-setup',
+                    extra: device.name,
+                  ),
+                ),
+              ),
               const SizedBox(height: AppSpacing.xl),
               usageAsync.when(
                 loading: () =>
@@ -291,6 +321,153 @@ class _DeviceHeaderCard extends StatelessWidget {
                 color: device.internetLocked ? scheme.error : colors.warning,
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConnectionStatusCard extends StatelessWidget {
+  const _ConnectionStatusCard({
+    required this.device,
+    required this.stats,
+    required this.onFinishPairing,
+  });
+
+  final DeviceModel device;
+  final ConnectionStats stats;
+  final VoidCallback onFinishPairing;
+
+  String _qualityLabel(ConnectionQuality quality) {
+    switch (quality) {
+      case ConnectionQuality.excellent:
+        return 'Excellent';
+      case ConnectionQuality.good:
+        return 'Good';
+      case ConnectionQuality.poor:
+        return 'Poor';
+      case ConnectionQuality.offline:
+        return 'Offline';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.scheme;
+    final colors = context.colors;
+
+    if (!stats.paired) {
+      return GlassCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.error_outline_rounded, color: colors.warning),
+                const SizedBox(width: AppSpacing.space8),
+                Text('Not paired yet', style: Theme.of(context).textTheme.titleLarge),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.space12),
+            Text(
+              'This device has never confirmed a DNS connection. Finish the guided setup to pair it automatically.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: AppSpacing.space16),
+            GradientButton(label: 'Finish Setup', onPressed: onFinishPairing),
+          ],
+        ),
+      );
+    }
+
+    final quality = stats.connectionQuality;
+    final connected = quality != ConnectionQuality.offline;
+    final qualityColor = switch (quality) {
+      ConnectionQuality.excellent => colors.success,
+      ConnectionQuality.good => colors.success,
+      ConnectionQuality.poor => colors.warning,
+      ConnectionQuality.offline => scheme.error,
+    };
+
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                connected ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+                color: qualityColor,
+              ),
+              const SizedBox(width: AppSpacing.space8),
+              Text(
+                connected ? 'Connected' : 'Not seen recently',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const Spacer(),
+              StatusBadge(label: _qualityLabel(quality), color: qualityColor),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.space16),
+          _ConnectionDetailRow(
+            label: 'Resolver',
+            value: stats.resolverRegion ?? 'Default',
+          ),
+          _ConnectionDetailRow(
+            label: 'Public IP',
+            value: stats.publicIp ?? 'Unknown',
+          ),
+          _ConnectionDetailRow(
+            label: 'Last DNS query',
+            value: stats.lastQueryDomain ?? 'None yet',
+          ),
+          _ConnectionDetailRow(
+            label: 'Queries today',
+            value: '${stats.queriesToday}',
+          ),
+          _ConnectionDetailRow(
+            label: 'Last heartbeat',
+            value: stats.lastDnsSeenAt == null
+                ? 'No heartbeat yet'
+                : DateFormat('MMM d, HH:mm').format(stats.lastDnsSeenAt!),
+          ),
+          _ConnectionDetailRow(
+            label: 'Protection',
+            value: device.internetLocked ? 'Full lock active' : 'Active',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConnectionDetailRow extends StatelessWidget {
+  const _ConnectionDetailRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.space6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: context.scheme.onSurfaceVariant),
+          ),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),
