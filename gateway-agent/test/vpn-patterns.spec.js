@@ -1,6 +1,6 @@
 'use strict';
 
-const { matchVpnDomain, matchVpnPort, matchVpnIp } = require('../src/vpn-patterns');
+const { matchVpnDomain, matchVpnPort, matchVpnPortDetectionOnly, matchVpnIp } = require('../src/vpn-patterns');
 
 describe('matchVpnDomain', () => {
   it('matches an exact known VPN domain', () => {
@@ -44,11 +44,43 @@ describe('matchVpnPort', () => {
   it('does not match an unlisted port', () => {
     expect(matchVpnPort('udp', 12345)).toBeNull();
   });
+
+  it('matches the expanded protocol signatures added for L2TP/PPTP/SoftEther/Outline/Tailscale/ZeroTier', () => {
+    expect(matchVpnPort('udp', 1701)).toBe('L2TP');
+    expect(matchVpnPort('tcp', 1723)).toBe('PPTP');
+    expect(matchVpnPort('tcp', 992)).toBe('SoftEther');
+    expect(matchVpnPort('tcp', 5555)).toBe('SoftEther');
+    expect(matchVpnPort('udp', 41194)).toBe('Outline (Shadowsocks, common default)');
+    expect(matchVpnPort('udp', 41641)).toBe('Tailscale');
+    expect(matchVpnPort('udp', 9993)).toBe('ZeroTier');
+  });
+});
+
+describe('matchVpnPortDetectionOnly', () => {
+  it('matches generic proxy ports, but only as a detection-only signal', () => {
+    expect(matchVpnPortDetectionOnly('tcp', 1080)).toBe('SOCKS proxy');
+    expect(matchVpnPortDetectionOnly('tcp', 3128)).toBe('HTTP/HTTPS proxy (Squid default)');
+    expect(matchVpnPortDetectionOnly('tcp', 8080)).toBe('HTTP/HTTPS proxy');
+  });
+
+  it('deliberately does not match port 443 — see the module comment on why', () => {
+    expect(matchVpnPortDetectionOnly('tcp', 443)).toBeNull();
+  });
+
+  it('does not overlap with the auto-block-eligible matchVpnPort list', () => {
+    expect(matchVpnPort('tcp', 1080)).toBeNull();
+    expect(matchVpnPort('tcp', 8080)).toBeNull();
+  });
 });
 
 describe('matchVpnIp', () => {
   it('matches an IP inside a known VPN provider range', () => {
     expect(matchVpnIp('162.159.192.10')).toBe('Cloudflare WARP');
+  });
+
+  it('matches an IP inside the Tailscale CGNAT range', () => {
+    expect(matchVpnIp('100.64.1.5')).toBe('Tailscale');
+    expect(matchVpnIp('100.127.255.254')).toBe('Tailscale');
   });
 
   it('does not match an IP outside all known ranges', () => {

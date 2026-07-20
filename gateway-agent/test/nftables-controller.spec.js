@@ -166,6 +166,89 @@ describe('NftablesController', () => {
     );
   });
 
+  it('adds an ip6 saddr block rule for a target with a known IPv6 address, plus a family-agnostic mac rule', async () => {
+    const calls = mockExecFile();
+    const controller = new NftablesController(baseConfig({ enableIpv6: true }), fakeLogger());
+
+    await controller.sync({
+      targets: [{ deviceId: 'dev-1', action: 'BLOCK', ipAddress: '192.168.1.50', ipv6Address: '2001:db8::1', macAddress: 'aa:bb:cc:dd:ee:ff' }],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: false,
+    });
+
+    expect(calls.some((args) => args.includes('ip6') && args.includes('saddr') && args.includes('2001:db8::1'))).toBe(true);
+    expect(calls.some((args) => args.includes('ether') && args.includes('saddr') && args.includes('aa:bb:cc:dd:ee:ff'))).toBe(true);
+  });
+
+  it('does not add an ip6 rule when enableIpv6 is false, even with a known IPv6 address', async () => {
+    const calls = mockExecFile();
+    const controller = new NftablesController(baseConfig({ enableIpv6: false }), fakeLogger());
+
+    await controller.sync({
+      targets: [{ deviceId: 'dev-1', action: 'BLOCK', ipAddress: '192.168.1.50', ipv6Address: '2001:db8::1' }],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: false,
+    });
+
+    expect(calls.some((args) => args.includes('ip6'))).toBe(false);
+  });
+
+  it('sets up a separate ip6-family NAT table for the v6 DNS redirect when a v6 resolver is configured', async () => {
+    const calls = mockExecFile();
+    const controller = new NftablesController(baseConfig({ enableIpv6: true, dnsRedirectIpv6: '2001:db8::53' }), fakeLogger());
+
+    await controller.sync({
+      targets: [],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: true,
+    });
+
+    expect(calls.some((args) => args.includes('ip6') && args.includes('guardtime_nat6'))).toBe(true);
+    expect(calls.some((args) => args.includes('dnat') && args.includes('2001:db8::53'))).toBe(true);
+  });
+
+  it('skips the v6 NAT table entirely when no v6 resolver is configured', async () => {
+    const calls = mockExecFile();
+    const controller = new NftablesController(baseConfig({ enableIpv6: true }), fakeLogger());
+
+    await controller.sync({
+      targets: [],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: true,
+    });
+
+    expect(calls.some((args) => args.includes('guardtime_nat6'))).toBe(false);
+  });
+
+  it('DoH/DoT: adds a port-853 drop rule and known DoH provider IP drop rules when enableDohBlock is set', async () => {
+    const calls = mockExecFile();
+    const controller = new NftablesController(baseConfig(), fakeLogger());
+
+    await controller.sync({
+      targets: [],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: false,
+      enableDohBlock: true,
+    });
+
+    expect(calls.some((args) => args.includes('853') && args.includes('tcp'))).toBe(true);
+    expect(calls.some((args) => args.includes('853') && args.includes('udp'))).toBe(true);
+    expect(calls.some((args) => args.includes('daddr') && args.includes('1.1.1.1'))).toBe(true);
+  });
+
+  it('does not add DoH/DoT rules when enableDohBlock is not set', async () => {
+    const calls = mockExecFile();
+    const controller = new NftablesController(baseConfig(), fakeLogger());
+
+    await controller.sync({
+      targets: [],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: false,
+    });
+
+    expect(calls.some((args) => args.includes('853'))).toBe(false);
+  });
+
   it('dry-run mode never issues mutating nft commands (snapshot read is still allowed)', async () => {
     const calls = mockExecFile();
     const controller = new NftablesController(baseConfig({ dryRun: true }), fakeLogger());

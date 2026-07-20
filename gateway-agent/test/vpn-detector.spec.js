@@ -11,8 +11,11 @@ function target(overrides = {}) {
   return { deviceId: 'dev-1', ipAddress: '192.168.1.50', ...overrides };
 }
 
-function buildDetector({ udpFlows = [], dnsQueries = [] } = {}) {
-  const conntrack = { listUdpConnections: jest.fn().mockResolvedValue(udpFlows) };
+function buildDetector({ udpFlows = [], tcpFlows = [], dnsQueries = [] } = {}) {
+  const conntrack = {
+    listUdpConnections: jest.fn().mockResolvedValue(udpFlows),
+    listTcpConnections: jest.fn().mockResolvedValue(tcpFlows),
+  };
   const dnsSniff = { captureDnsQueries: jest.fn().mockResolvedValue(dnsQueries) };
   const metrics = new Metrics();
   const logger = fakeLogger();
@@ -84,7 +87,10 @@ describe('VpnDetector.sync', () => {
   });
 
   it('never throws when conntrack listing fails, and still checks DNS', async () => {
-    const conntrack = { listUdpConnections: jest.fn().mockRejectedValue(new Error('conntrack unavailable')) };
+    const conntrack = {
+      listUdpConnections: jest.fn().mockRejectedValue(new Error('conntrack unavailable')),
+      listTcpConnections: jest.fn().mockRejectedValue(new Error('conntrack unavailable')),
+    };
     const dnsSniff = { captureDnsQueries: jest.fn().mockResolvedValue(['mullvad.net']) };
     const detector = new VpnDetector({ conntrack, dnsSniff, metrics: new Metrics(), logger: fakeLogger() });
 
@@ -97,6 +103,7 @@ describe('VpnDetector.sync', () => {
       listUdpConnections: jest.fn((ip) =>
         Promise.resolve(ip === '192.168.1.50' ? [{ src: ip, dst: '1.2.3.4', sport: 1, dport: 1194 }] : []),
       ),
+      listTcpConnections: jest.fn().mockResolvedValue([]),
     };
     const dnsSniff = { captureDnsQueries: jest.fn().mockResolvedValue([]) };
     const detector = new VpnDetector({ conntrack, dnsSniff, metrics: new Metrics(), logger: fakeLogger() });
@@ -107,5 +114,37 @@ describe('VpnDetector.sync', () => {
     ]);
 
     expect(report).toEqual([{ deviceId: 'dev-1', method: 'port-signature', provider: 'OpenVPN', detail: '1194' }]);
+  });
+
+  it('flags a TCP port-signature match (e.g. PPTP) from a TCP conntrack flow', async () => {
+    const { detector } = buildDetector({
+      tcpFlows: [{ src: '192.168.1.50', dst: '203.0.113.9', sport: 44000, dport: 1723 }],
+    });
+
+    const report = await detector.sync([target()]);
+
+    expect(report).toEqual([{ deviceId: 'dev-1', method: 'port-signature', provider: 'PPTP', detail: '1723' }]);
+  });
+
+  it('flags a low-confidence detection-only match (e.g. a SOCKS proxy port) distinctly from a high-confidence one', async () => {
+    const { detector } = buildDetector({
+      tcpFlows: [{ src: '192.168.1.50', dst: '203.0.113.9', sport: 44000, dport: 1080 }],
+    });
+
+    const report = await detector.sync([target()]);
+
+    expect(report).toEqual([
+      { deviceId: 'dev-1', method: 'port-signature-low-confidence', provider: 'SOCKS proxy', detail: '1080' },
+    ]);
+  });
+
+  it('does not flag ordinary TCP/443 web traffic as anything', async () => {
+    const { detector } = buildDetector({
+      tcpFlows: [{ src: '192.168.1.50', dst: '93.184.216.34', sport: 44000, dport: 443 }],
+    });
+
+    const report = await detector.sync([target()]);
+
+    expect(report).toEqual([]);
   });
 });

@@ -137,4 +137,53 @@ describe('ConnectionKiller', () => {
     await killer.sync(targets);
     expect(deps.conntrack.killDevice).toHaveBeenCalledTimes(2);
   });
+
+  describe('IPv6', () => {
+    it('_shouldRun triggers for a target with only an ipv6Address (no v4 address known)', () => {
+      const deps = buildKiller();
+      const killer = new ConnectionKiller(deps);
+      expect(killer._shouldRun(target({ ipAddress: null, ipv6Address: '2001:db8::1' }))).toBe(true);
+    });
+
+    it('_shouldRun runs again if only the ipv6Address changes while still BLOCK', () => {
+      const deps = buildKiller();
+      const killer = new ConnectionKiller(deps);
+      killer._rememberStates([target({ ipv6Address: '2001:db8::1' })]);
+      expect(killer._shouldRun(target({ ipv6Address: '2001:db8::2' }))).toBe(true);
+    });
+
+    it('kills conntrack + injects tcp resets for BOTH the v4 and v6 address of a dual-stack device', async () => {
+      const deps = buildKiller();
+      const killer = new ConnectionKiller(deps);
+
+      await killer.sync([target({ ipv6Address: '2001:db8::1' })]);
+
+      expect(deps.conntrack.killDevice).toHaveBeenCalledWith('192.168.1.50');
+      expect(deps.conntrack.killDevice).toHaveBeenCalledWith('2001:db8::1');
+      expect(deps.tcpReset.killDevice).toHaveBeenCalledWith('192.168.1.50', []);
+      expect(deps.tcpReset.killDevice).toHaveBeenCalledWith('2001:db8::1', []);
+      expect(deps.metrics.snapshot()['connectionKiller.killed']).toBe(1);
+    });
+
+    it('a v6-only kill failure does not block the v4 kill from succeeding', async () => {
+      const conntrack = {
+        killDevice: jest.fn((ip) => (ip === '2001:db8::1' ? Promise.reject(new Error('no ip6tables support')) : Promise.resolve(undefined))),
+        listTcpConnections: jest.fn().mockResolvedValue([]),
+      };
+      const logger = fakeLogger();
+      const deps = buildKiller({ conntrack, logger });
+      const killer = new ConnectionKiller(deps);
+
+      await killer.sync([target({ ipv6Address: '2001:db8::1' })]);
+
+      // v4 kill went through (retried 3x for the v6 failure, but v4 itself only needed 1 call).
+      expect(conntrack.killDevice).toHaveBeenCalledWith('192.168.1.50');
+      expect(deps.metrics.snapshot()['connectionKiller.killed']).toBe(1);
+      expect(deps.metrics.snapshot()['connectionKiller.failed']).toBe(1);
+      expect(logger.error).toHaveBeenCalledWith(
+        'connection kill failed after retries exhausted',
+        expect.objectContaining({ deviceId: 'dev-1' }),
+      );
+    });
+  });
 });

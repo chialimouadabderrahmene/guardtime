@@ -4,13 +4,18 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const execFileAsync = promisify(execFile);
 
+// IPv6-aware: scapy's IPv6 layer takes the identical src/dst/TCP-stacking
+// API as IP, so send_rst_pair picks whichever layer actually matched the
+// sniffed packet (IPv6 in pkt) rather than assuming IPv4 — the same single
+// script now handles a v6 device_ip transparently. BPF's `host` keyword
+// already accepts either address family without a syntax change.
 const SCAPY_RST_PROGRAM = String.raw`
 import json
 import sys
 import time
 
 try:
-    from scapy.all import IP, TCP, Raw, send, sniff, conf
+    from scapy.all import IP, IPv6, TCP, Raw, send, sniff, conf
 except Exception as exc:
     print(json.dumps({"ok": False, "error": "scapy unavailable: %s" % exc}))
     sys.exit(2)
@@ -35,7 +40,9 @@ def tcp_len(pkt):
 
 def send_rst_pair(pkt):
     global sent
-    ip = pkt[IP]
+    is_v6 = IPv6 in pkt
+    ip_layer = IPv6 if is_v6 else IP
+    ip = pkt[ip_layer]
     tcp = pkt[TCP]
     key = (ip.src, int(tcp.sport), ip.dst, int(tcp.dport))
     if flow_keys and key not in flow_keys:
@@ -43,11 +50,11 @@ def send_rst_pair(pkt):
 
     next_seq = int(tcp.seq) + tcp_len(pkt)
     packets = [
-        IP(src=ip.src, dst=ip.dst) / TCP(sport=tcp.sport, dport=tcp.dport, flags="R", seq=next_seq),
+        ip_layer(src=ip.src, dst=ip.dst) / TCP(sport=tcp.sport, dport=tcp.dport, flags="R", seq=next_seq),
     ]
     if "A" in tcp.flags:
         packets.append(
-            IP(src=ip.dst, dst=ip.src) / TCP(sport=tcp.dport, dport=tcp.sport, flags="R", seq=int(tcp.ack))
+            ip_layer(src=ip.dst, dst=ip.src) / TCP(sport=tcp.dport, dport=tcp.sport, flags="R", seq=int(tcp.ack))
         )
     send(packets, verbose=False)
     sent += len(packets)

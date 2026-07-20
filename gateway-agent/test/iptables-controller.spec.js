@@ -143,6 +143,127 @@ describe('IptablesController', () => {
     );
   });
 
+  it('mirrors a block rule onto ip6tables (MAC-based) even without a known IPv6 address', async () => {
+    const calls = mockExecFile();
+    const controller = new IptablesController(baseConfig({ enableIpv6: true }), fakeLogger());
+
+    await controller.sync({
+      targets: [{ deviceId: 'dev-1', action: 'BLOCK', ipAddress: '192.168.1.50', macAddress: 'AA:BB:CC:DD:EE:FF' }],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: false,
+    });
+
+    const v6Calls = calls.filter((c) => c.cmd === 'ip6tables');
+    expect(v6Calls.some((c) => c.args.includes('--mac-source') && c.args.includes('AA:BB:CC:DD:EE:FF'))).toBe(true);
+    // No IPv6 address known yet — no v6 IP-based DROP rule should exist.
+    expect(v6Calls.some((c) => c.args.includes('-s') && c.args.includes('192.168.1.50'))).toBe(false);
+  });
+
+  it('adds a v6 IP-based block rule once the target has an ipv6Address', async () => {
+    const calls = mockExecFile();
+    const controller = new IptablesController(baseConfig({ enableIpv6: true }), fakeLogger());
+
+    await controller.sync({
+      targets: [{ deviceId: 'dev-1', action: 'BLOCK', ipAddress: '192.168.1.50', ipv6Address: '2001:db8::1' }],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: false,
+    });
+
+    const v6Calls = calls.filter((c) => c.cmd === 'ip6tables');
+    expect(v6Calls.some((c) => c.args.includes('-s') && c.args.includes('2001:db8::1') && c.args.includes('DROP'))).toBe(true);
+  });
+
+  it('does not run ip6tables at all when enableIpv6 is false', async () => {
+    const calls = mockExecFile();
+    const controller = new IptablesController(baseConfig({ enableIpv6: false }), fakeLogger());
+
+    await controller.sync({
+      targets: [{ deviceId: 'dev-1', action: 'BLOCK', ipAddress: '192.168.1.50', ipv6Address: '2001:db8::1' }],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: false,
+    });
+
+    expect(calls.some((c) => c.cmd === 'ip6tables')).toBe(false);
+  });
+
+  it('skips the v6 DNS redirect rule when no IPv6 resolver is configured, but still applies v6 block rules', async () => {
+    const calls = mockExecFile();
+    const controller = new IptablesController(baseConfig({ enableIpv6: true }), fakeLogger());
+
+    await controller.sync({
+      targets: [{ deviceId: 'dev-1', action: 'BLOCK', ipAddress: '192.168.1.50', ipv6Address: '2001:db8::1' }],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: true,
+    });
+
+    const v6Calls = calls.filter((c) => c.cmd === 'ip6tables');
+    expect(v6Calls.some((c) => c.args.includes('DNAT'))).toBe(false);
+    expect(v6Calls.some((c) => c.args.includes('-s') && c.args.includes('2001:db8::1'))).toBe(true);
+  });
+
+  it('applies the v6 DNS redirect with bracketed destination syntax when an IPv6 resolver is configured', async () => {
+    const calls = mockExecFile();
+    const controller = new IptablesController(baseConfig({ enableIpv6: true, dnsRedirectIpv6: '2001:db8::53' }), fakeLogger());
+
+    await controller.sync({
+      targets: [],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: true,
+    });
+
+    const v6Calls = calls.filter((c) => c.cmd === 'ip6tables');
+    expect(v6Calls.some((c) => c.args.includes('DNAT') && c.args.includes('[2001:db8::53]:53'))).toBe(true);
+  });
+
+  it('a v6-stage failure rolls back only the v6 ruleset — v4 enforcement is unaffected', async () => {
+    const calls = mockExecFile({ fail: (args) => args.includes('2001:db8::99') });
+    const logger = fakeLogger();
+    const controller = new IptablesController(baseConfig({ enableIpv6: true }), logger);
+
+    await expect(
+      controller.sync({
+        targets: [{ deviceId: 'dev-1', action: 'BLOCK', ipAddress: '192.168.1.50', ipv6Address: '2001:db8::99' }],
+        dnsRedirectIp: '10.0.0.1',
+        enableDnsRedirect: false,
+      }),
+    ).resolves.not.toThrow();
+
+    expect(calls.some((c) => c.cmd === 'iptables' && c.args.includes('192.168.1.50') && c.args.includes('DROP'))).toBe(true);
+    expect(logger.error).toHaveBeenCalledWith(
+      'ip6tables sync failed — IPv4 enforcement is unaffected',
+      expect.objectContaining({ error: expect.any(String) }),
+    );
+  });
+
+  it('DoH/DoT block: drops port 853 (both protocols) and known DoH provider IPs on 443', async () => {
+    const calls = mockExecFile();
+    const controller = new IptablesController(baseConfig(), fakeLogger());
+
+    await controller.sync({
+      targets: [],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: false,
+      enableDohBlock: true,
+    });
+
+    expect(calls.some((c) => c.args.includes('853') && c.args.includes('tcp') && c.args.includes('DROP'))).toBe(true);
+    expect(calls.some((c) => c.args.includes('853') && c.args.includes('udp') && c.args.includes('DROP'))).toBe(true);
+    expect(calls.some((c) => c.args.includes('-d') && c.args.includes('1.1.1.1') && c.args.includes('DROP'))).toBe(true);
+  });
+
+  it('does not apply DoH/DoT rules when enableDohBlock is not set', async () => {
+    const calls = mockExecFile();
+    const controller = new IptablesController(baseConfig(), fakeLogger());
+
+    await controller.sync({
+      targets: [],
+      dnsRedirectIp: '10.0.0.1',
+      enableDnsRedirect: false,
+    });
+
+    expect(calls.some((c) => c.args.includes('853'))).toBe(false);
+  });
+
   it('dry-run mode short-circuits every mutating rule command', async () => {
     const calls = mockExecFile();
     const controller = new IptablesController(baseConfig({ dryRun: true }), fakeLogger());

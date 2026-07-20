@@ -43,6 +43,22 @@ function loadConfig() {
     enableDnsRedirect: bool('ENABLE_DNS_REDIRECT', true),
     dryRun: bool('DRY_RUN', false),
     iptablesBin: process.env.IPTABLES_BIN || 'iptables',
+    iptablesSaveBin: process.env.IPTABLES_SAVE_BIN || 'iptables-save',
+    iptablesRestoreBin: process.env.IPTABLES_RESTORE_BIN || 'iptables-restore',
+
+    // IPv6 mirror of every rule the v4 controllers apply — on by default so
+    // a dual-stack device (most home ISPs hand out IPv6 today) can't bypass
+    // enforcement just by using its v6 address. Per-target IPv6 rules are
+    // only added for devices gateway-agent has actually discovered an IPv6
+    // neighbor-table entry for (see device-discovery.js); a host with no
+    // ip6tables/nft-ipv6 support at all can set ENABLE_IPV6=false and fall
+    // back to v4-only behaviour identical to before this flag existed.
+    enableIpv6: bool('ENABLE_IPV6', true),
+    ip6tablesBin: process.env.IP6TABLES_BIN || 'ip6tables',
+    ip6tablesSaveBin: process.env.IP6TABLES_SAVE_BIN || 'ip6tables-save',
+    ip6tablesRestoreBin: process.env.IP6TABLES_RESTORE_BIN || 'ip6tables-restore',
+    dnsRedirectIpv6: process.env.DNS_REDIRECT_IPV6 || '',
+
     conntrackBin: process.env.CONNTRACK_BIN || 'conntrack',
     tcBin: process.env.TC_BIN || 'tc',
     pythonBin: process.env.PYTHON_BIN || 'python3',
@@ -81,10 +97,31 @@ function loadConfig() {
     enableVpnDnsSniff: bool('ENABLE_VPN_DNS_SNIFF', false),
     vpnDnsSniffMs: int('VPN_DNS_SNIFF_MS', 500),
 
+    // Layer 5b: JA3 TLS-fingerprint detection — same opt-in posture as the
+    // DNS sniff above (adds a sniff window per device per cycle). The
+    // known-signature denylist is empty unless an operator supplies real,
+    // verified JA3 hashes — see tls-fingerprint-detector.js for why none
+    // are hardcoded here.
+    enableTlsFingerprint: bool('ENABLE_TLS_FINGERPRINT', false),
+    tlsFingerprintSniffMs: int('TLS_FINGERPRINT_SNIFF_MS', 800),
+    tlsVpnJa3Hashes: (process.env.TLS_VPN_JA3_HASHES || '')
+      .split(',')
+      .map((hash) => hash.trim().toLowerCase())
+      .filter(Boolean),
+
     // Layer 6: QUIC (HTTP/3, UDP/443) blocking. Global applies to every
     // device; per-device is still driven by the policy payload's quicBlock
     // flag either way.
     enableQuicBlockGlobal: bool('ENABLE_QUIC_BLOCK_GLOBAL', false),
+
+    // Layer 8: DoH/DoT protection. Global (not per-device) — DNS-over-TLS
+    // and known-provider DNS-over-HTTPS have no legitimate reason to be
+    // exempted for a specific device once a household opts in, unlike VPN
+    // blocking which parents may want device-specific. See
+    // doh-dot-patterns.js for exactly what this does and does not catch.
+    enableDohBlock: bool('ENABLE_DOH_BLOCK', true),
+    enableDohDnsSniff: bool('ENABLE_DOH_DNS_SNIFF', false),
+    dohDnsSniffMs: int('DOH_DNS_SNIFF_MS', 500),
 
     // Layer 7: bandwidth control.
     enableBandwidthControl: bool('ENABLE_BANDWIDTH_CONTROL', true),

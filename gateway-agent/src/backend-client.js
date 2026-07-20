@@ -24,6 +24,13 @@ class BackendClient {
     });
   }
 
+  async reportDohDetections(detections) {
+    return this.request('/gateway/doh-detections', {
+      method: 'POST',
+      body: JSON.stringify({ detections }),
+    });
+  }
+
   async reportRouterDetection(detection) {
     return this.request('/gateway/router/detection', {
       method: 'POST',

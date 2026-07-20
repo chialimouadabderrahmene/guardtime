@@ -31,10 +31,11 @@ class ConnectionKiller {
     const previous = this.previousStates.get(target.deviceId);
     return (
       target.action === 'BLOCK' &&
-      !!target.ipAddress &&
+      (!!target.ipAddress || !!target.ipv6Address) &&
       (!previous ||
         previous.action !== 'BLOCK' ||
         previous.ipAddress !== target.ipAddress ||
+        previous.ipv6Address !== target.ipv6Address ||
         previous.macAddress !== target.macAddress)
     );
   }
@@ -46,6 +47,7 @@ class ConnectionKiller {
       this.previousStates.set(target.deviceId, {
         action: target.action,
         ipAddress: target.ipAddress,
+        ipv6Address: target.ipv6Address,
         macAddress: target.macAddress,
       });
     }
@@ -54,12 +56,12 @@ class ConnectionKiller {
     }
   }
 
-  async _killOne(target) {
-    this.metrics.inc('connectionKiller.attempts');
-
-    const flows = await this.conntrack.listTcpConnections(target.ipAddress).catch((err) => {
+  /** Runs the full conntrack-flush + TCP-RST chain for one address (v4 or v6) of a target. */
+  async _killAddress(target, ipAddress) {
+    const flows = await this.conntrack.listTcpConnections(ipAddress).catch((err) => {
       this.logger.warn('failed to capture tcp flows before block', {
         deviceId: target.deviceId,
+        ipAddress,
         error: err.message,
       });
       return [];
@@ -67,32 +69,51 @@ class ConnectionKiller {
 
     this.logger.info('active block transition detected', {
       deviceId: target.deviceId,
-      ipAddress: target.ipAddress,
+      ipAddress,
       macAddress: target.macAddress,
       tcpFlows: flows.length,
     });
 
-    try {
-      await retry(() => this.conntrack.killDevice(target.ipAddress), {
-        attempts: 3,
-        delayMs: 150,
-        onRetry: (err, attempt) => {
-          this.metrics.inc('connectionKiller.retries');
-          this.logger.warn('conntrack kill retry', {
-            deviceId: target.deviceId,
-            attempt,
-            error: err.message,
-          });
-        },
-      });
-      await this.tcpReset.killDevice(target.ipAddress, flows);
-      this.metrics.inc('connectionKiller.killed');
-    } catch (err) {
+    await retry(() => this.conntrack.killDevice(ipAddress), {
+      attempts: 3,
+      delayMs: 150,
+      onRetry: (err, attempt) => {
+        this.metrics.inc('connectionKiller.retries');
+        this.logger.warn('conntrack kill retry', {
+          deviceId: target.deviceId,
+          ipAddress,
+          attempt,
+          error: err.message,
+        });
+      },
+    });
+    await this.tcpReset.killDevice(ipAddress, flows);
+  }
+
+  /**
+   * Kills both addresses of a target independently so a v6-only failure
+   * (e.g. no ip6tables/conntrack IPv6 support on this host) doesn't prevent
+   * the v4 kill from completing, and vice versa.
+   */
+  async _killOne(target) {
+    this.metrics.inc('connectionKiller.attempts');
+    const addresses = [target.ipAddress, target.ipv6Address].filter(Boolean);
+
+    const results = await Promise.allSettled(addresses.map((address) => this._killAddress(target, address)));
+    const anySucceeded = results.some((result) => result.status === 'fulfilled');
+    const anyFailed = results.some((result) => result.status === 'rejected');
+
+    if (anySucceeded) this.metrics.inc('connectionKiller.killed');
+    if (anyFailed) {
       this.metrics.inc('connectionKiller.failed');
-      this.logger.error('connection kill failed after retries exhausted', {
-        deviceId: target.deviceId,
-        error: err.message,
-      });
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          this.logger.error('connection kill failed after retries exhausted', {
+            deviceId: target.deviceId,
+            error: result.reason?.message || String(result.reason),
+          });
+        }
+      }
     }
   }
 

@@ -22,12 +22,13 @@ const { syncOnce, summarize } = require('../src/main');
 const { Metrics } = require('../src/metrics');
 const logger = require('../src/logger');
 
-function buildDeps({ devices = [], vpnDetections = [] } = {}) {
+function buildDeps({ devices = [], vpnDetections = [], dohDetections = [] } = {}) {
   return {
     backend: {
       getPolicies: jest.fn().mockResolvedValue({ devices }),
       reportDiscovery: jest.fn().mockResolvedValue({}),
       reportVpnDetections: jest.fn().mockResolvedValue({}),
+      reportDohDetections: jest.fn().mockResolvedValue({}),
     },
     routerCommandExecutor: {
       maybeRunDetection: jest.fn().mockResolvedValue(undefined),
@@ -36,6 +37,7 @@ function buildDeps({ devices = [], vpnDetections = [] } = {}) {
     firewall: { sync: jest.fn().mockResolvedValue(undefined) },
     connectionKiller: { sync: jest.fn().mockResolvedValue(undefined) },
     vpnDetector: { sync: jest.fn().mockResolvedValue(vpnDetections) },
+    dohDetector: { sync: jest.fn().mockResolvedValue(dohDetections) },
     qos: { sync: jest.fn().mockResolvedValue(undefined) },
     managementGuard: {
       refresh: jest.fn().mockResolvedValue(undefined),
@@ -47,6 +49,7 @@ function buildDeps({ devices = [], vpnDetections = [] } = {}) {
       enableDnsRedirect: true,
       enableQuicBlockGlobal: false,
       enableVpnBlock: true,
+      enableDohBlock: true,
     },
   };
 }
@@ -141,6 +144,37 @@ describe('syncOnce', () => {
     deps.config.enableVpnBlock = false;
     await syncOnce(deps);
     expect(deps.vpnDetector.sync).not.toHaveBeenCalled();
+  });
+
+  it('reports doh/dot detections to the backend only when there are any', async () => {
+    const detections = [{ deviceId: 'dev-1', provider: 'DoT', method: 'conntrack-port-853' }];
+    const deps = buildDeps({ dohDetections: detections });
+
+    await syncOnce(deps);
+
+    expect(deps.backend.reportDohDetections).toHaveBeenCalledWith(detections);
+  });
+
+  it('does not call reportDohDetections when there is nothing to report', async () => {
+    const deps = buildDeps({ dohDetections: [] });
+    await syncOnce(deps);
+    expect(deps.backend.reportDohDetections).not.toHaveBeenCalled();
+  });
+
+  it('skips the doh detector entirely when doh/dot blocking is disabled', async () => {
+    const deps = buildDeps();
+    deps.config.enableDohBlock = false;
+    await syncOnce(deps);
+    expect(deps.dohDetector.sync).not.toHaveBeenCalled();
+  });
+
+  it('passes dnsRedirectIpv6 and enableDohBlock through to firewall.sync', async () => {
+    const deps = buildDeps();
+    deps.config.dnsRedirectIpv6 = '2001:db8::1';
+    await syncOnce(deps);
+    expect(deps.firewall.sync).toHaveBeenCalledWith(
+      expect.objectContaining({ dnsRedirectIpv6: '2001:db8::1', enableDohBlock: true }),
+    );
   });
 
   it('filters targets through managementGuard before dispatching to any enforcement stage', async () => {

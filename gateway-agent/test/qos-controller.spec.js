@@ -92,6 +92,35 @@ describe('QosController — existing throttle behaviour (preserved)', () => {
     // matters is that no *filter* sends this device's traffic into it.
     expect(calls.some((a) => a[0] === 'filter' && a.includes('1:10') && a.includes('192.168.1.50'))).toBe(false);
   });
+
+  it('adds an ip6 u32 throttle filter for a THROTTLE target with an ipv6Address, when enableIpv6 is set', async () => {
+    const calls = mockExecFile();
+    const controller = new QosController(baseConfig({ enableIpv6: true }), fakeLogger(), new Metrics(), fakeDnsResolveCache());
+
+    await controller.sync([{ deviceId: 'dev-1', action: 'THROTTLE', ipAddress: '192.168.1.50', ipv6Address: '2001:db8::1' }]);
+
+    expect(
+      calls.some((a) => a.includes('protocol') && a.includes('ipv6') && a.includes('ip6') && a.includes('2001:db8::1') && a.includes('1:10')),
+    ).toBe(true);
+  });
+
+  it('clears prior ipv6 filters every cycle too, when enableIpv6 is set', async () => {
+    const calls = mockExecFile();
+    const controller = new QosController(baseConfig({ enableIpv6: true }), fakeLogger(), new Metrics(), fakeDnsResolveCache());
+
+    await controller.sync([]);
+
+    expect(calls).toContainEqual(['filter', 'del', 'dev', 'eth0', 'protocol', 'ipv6', 'parent', '1:']);
+  });
+
+  it('does not touch ip6 filters at all when enableIpv6 is not set', async () => {
+    const calls = mockExecFile();
+    const controller = new QosController(baseConfig(), fakeLogger(), new Metrics(), fakeDnsResolveCache());
+
+    await controller.sync([{ deviceId: 'dev-1', action: 'THROTTLE', ipAddress: '192.168.1.50', ipv6Address: '2001:db8::1' }]);
+
+    expect(calls.some((a) => a.includes('ipv6') || a.includes('ip6'))).toBe(false);
+  });
 });
 
 describe('QosController — Layer 7 bandwidth limits', () => {

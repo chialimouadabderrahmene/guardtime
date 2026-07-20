@@ -14,6 +14,8 @@ const { ManagementGuard } = require('./management-guard');
 const { ConnectionKiller } = require('./connection-killer');
 const { DnsSniffController } = require('./dns-sniff-controller');
 const { VpnDetector } = require('./vpn-detector');
+const { DohDetector } = require('./doh-detector');
+const { TlsFingerprintDetector } = require('./tls-fingerprint-detector');
 const { DnsResolveCache } = require('./dns-resolve-cache');
 const { RouterCommandExecutor } = require('./router-command-executor');
 const { Metrics } = require('./metrics');
@@ -38,7 +40,7 @@ function summarize(targets) {
   };
 }
 
-async function syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos, managementGuard, routerCommandExecutor, metrics, config }) {
+async function syncOnce({ backend, firewall, connectionKiller, vpnDetector, dohDetector, qos, managementGuard, routerCommandExecutor, metrics, config }) {
   await managementGuard.refresh();
 
   const discovered = await discoverDevices(config, logger);
@@ -64,8 +66,10 @@ async function syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos,
   await firewall.sync({
     targets,
     dnsRedirectIp: config.dnsRedirectIp,
+    dnsRedirectIpv6: config.dnsRedirectIpv6,
     enableDnsRedirect: config.enableDnsRedirect,
     enableQuicBlockGlobal: config.enableQuicBlockGlobal,
+    enableDohBlock: config.enableDohBlock,
   });
 
   const quicBlockedCount = targets.filter(
@@ -86,6 +90,15 @@ async function syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos,
     if (detections.length > 0) {
       await backend.reportVpnDetections(detections).catch((err) => {
         logger.warn('failed to report vpn detections', { error: err.message });
+      });
+    }
+  }
+
+  if (config.enableDohBlock) {
+    const dohDetections = await dohDetector.sync(targets);
+    if (dohDetections.length > 0) {
+      await backend.reportDohDetections(dohDetections).catch((err) => {
+        logger.warn('failed to report doh/dot detections', { error: err.message });
       });
     }
   }
@@ -122,7 +135,9 @@ async function main() {
     logger,
   });
   const dnsSniff = new DnsSniffController(config, logger);
-  const vpnDetector = new VpnDetector({ conntrack, dnsSniff, metrics, logger });
+  const tlsFingerprint = new TlsFingerprintDetector(config, logger);
+  const vpnDetector = new VpnDetector({ conntrack, dnsSniff, tlsFingerprint, metrics, logger });
+  const dohDetector = new DohDetector({ conntrack, metrics, logger });
   const routerCommandExecutor = new RouterCommandExecutor({ backend, config, logger });
 
   logger.info('GuardTime gateway-agent starting', {
@@ -137,7 +152,7 @@ async function main() {
 
   while (!stopping) {
     try {
-      await syncOnce({ backend, firewall, connectionKiller, vpnDetector, qos, managementGuard, routerCommandExecutor, metrics, config });
+      await syncOnce({ backend, firewall, connectionKiller, vpnDetector, dohDetector, qos, managementGuard, routerCommandExecutor, metrics, config });
       writeHeartbeat({ ok: true, pollIntervalMs: config.pollIntervalMs });
     } catch (err) {
       logger.error('gateway policy sync failed', { error: err.message });

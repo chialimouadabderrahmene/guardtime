@@ -22,7 +22,9 @@ class QosController {
   async sync(targets) {
     if (!this.config.enableQos || this.config.qosInterfaces.length === 0) return;
 
-    const throttled = targets.filter((target) => target.action === 'THROTTLE' && target.ipAddress);
+    const throttled = targets.filter(
+      (target) => target.action === 'THROTTLE' && (target.ipAddress || target.ipv6Address),
+    );
     const downloadInterfaces = this.config.lanInterface ? [this.config.lanInterface] : this.config.qosInterfaces;
     const uploadInterfaces = this.config.wanInterface ? [this.config.wanInterface] : this.config.qosInterfaces;
     const allInterfaces = [...new Set([...this.config.qosInterfaces, ...downloadInterfaces, ...uploadInterfaces])];
@@ -34,7 +36,10 @@ class QosController {
 
     for (const iface of this.config.qosInterfaces) {
       for (const target of throttled) {
-        await this.addThrottleFilters(iface, target.ipAddress);
+        if (target.ipAddress) await this.addThrottleFilters(iface, target.ipAddress);
+        if (this.config.enableIpv6 && target.ipv6Address) {
+          await this.addThrottleFiltersV6(iface, target.ipv6Address);
+        }
       }
     }
 
@@ -71,6 +76,12 @@ class QosController {
       ignoreFailure: true,
       quiet: true,
     });
+    if (this.config.enableIpv6) {
+      await this.run(['filter', 'del', 'dev', iface, 'protocol', 'ipv6', 'parent', ROOT_HANDLE], {
+        ignoreFailure: true,
+        quiet: true,
+      });
+    }
   }
 
   async addThrottleFilters(iface, ipAddress) {
@@ -90,6 +101,28 @@ class QosController {
       'prio', '11',
       'u32',
       'match', 'ip', 'dst', ipAddress,
+      'flowid', THROTTLE_CLASS,
+    ]);
+  }
+
+  /** IPv6 mirror of addThrottleFilters — same u32 classifier, ip6 match, separate priority band. */
+  async addThrottleFiltersV6(iface, ipv6Address) {
+    await this.run([
+      'filter', 'add', 'dev', iface,
+      'protocol', 'ipv6',
+      'parent', ROOT_HANDLE,
+      'prio', '12',
+      'u32',
+      'match', 'ip6', 'src', ipv6Address,
+      'flowid', THROTTLE_CLASS,
+    ]);
+    await this.run([
+      'filter', 'add', 'dev', iface,
+      'protocol', 'ipv6',
+      'parent', ROOT_HANDLE,
+      'prio', '13',
+      'u32',
+      'match', 'ip6', 'dst', ipv6Address,
       'flowid', THROTTLE_CLASS,
     ]);
   }

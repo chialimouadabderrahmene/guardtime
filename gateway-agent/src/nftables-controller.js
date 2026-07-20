@@ -6,18 +6,33 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { VPN_PORT_SIGNATURES, VPN_IP_RANGES } = require('./vpn-patterns');
+const { DOH_PROVIDER_IPS, DOT_PORTS } = require('./doh-dot-patterns');
 const execFileAsync = promisify(execFile);
 
 const TABLE = 'guardtime';
 const FORWARD_CHAIN = 'block';
 const NAT_TABLE = 'guardtime_nat';
 const NAT_CHAIN = 'dns_redirect';
+// IPv6 DNAT needs its own family-specific nat table — nftables requires a
+// nat/prerouting hook chain's family to match the packets it processes, so
+// the v4 NAT_TABLE (family `ip`) can't also carry a v6 rule the way the
+// `inet`-family FORWARD_CHAIN can for block/VPN/QUIC/DoH rules below.
+const NAT_TABLE_V6 = 'guardtime_nat6';
 
 /**
  * nftables-backed equivalent of IptablesController (Layer 3). Same public
- * shape (`sync({ targets, dnsRedirectIp, enableDnsRedirect })`) so
- * FirewallController can select either backend without callers caring which
- * is active.
+ * shape (`sync({ targets, dnsRedirectIp, dnsRedirectIpv6, enableDnsRedirect,
+ * enableDohBlock, enableQuicBlockGlobal })`) so FirewallController can
+ * select either backend without callers caring which is active.
+ *
+ * IPv6: unlike iptables (which needs a wholly separate `ip6tables` binary
+ * and chain set), nftables' `inet` family already processes both IPv4 and
+ * IPv6 packets in one chain — so block/VPN/QUIC/DoH rules only need an
+ * extra `ip6 saddr`/`ip6 daddr` variant added alongside the existing `ip`
+ * one, in the SAME chain, not a second parallel sync pass. The DNS-redirect
+ * DNAT is the one exception: nftables' nat/prerouting hook is
+ * family-specific, so it needs its own small `ip6` family table
+ * (NAT_TABLE_V6) mirroring NAT_TABLE.
  *
  * Rollback: before mutating anything, the current ruleset is snapshotted via
  * `nft list ruleset`. If any step in `sync()` throws, the snapshot is
@@ -30,7 +45,7 @@ class NftablesController {
     this.logger = logger;
   }
 
-  async sync({ targets, dnsRedirectIp, enableDnsRedirect, enableQuicBlockGlobal }) {
+  async sync({ targets, dnsRedirectIp, dnsRedirectIpv6, enableDnsRedirect, enableQuicBlockGlobal, enableDohBlock }) {
     const snapshot = await this.snapshotRuleset();
     try {
       await this.ensureTable();
@@ -48,6 +63,10 @@ class NftablesController {
         }
       }
 
+      if (enableDohBlock) {
+        await this.addDohDotBlockRules();
+      }
+
       if (enableDnsRedirect) {
         await this.ensureDnsRedirect(dnsRedirectIp);
       }
@@ -61,6 +80,19 @@ class NftablesController {
         });
       });
       throw err;
+    }
+
+    if (this.config.enableIpv6) {
+      const v6ResolverIp = dnsRedirectIpv6 || this.config.dnsRedirectIpv6;
+      if (enableDnsRedirect && v6ResolverIp) {
+        try {
+          await this.ensureDnsRedirectV6(v6ResolverIp);
+        } catch (err) {
+          this.logger.error('nftables v6 DNS redirect failed — IPv4 DNS redirect is unaffected', {
+            error: err.message,
+          });
+        }
+      }
     }
   }
 
@@ -90,7 +122,17 @@ class NftablesController {
         'comment', `"${comment}-ip"`,
       ]);
     }
+    if (this.config.enableIpv6 && target.ipv6Address) {
+      await this.run([
+        'add', 'rule', 'inet', TABLE, FORWARD_CHAIN,
+        'ip6', 'saddr', target.ipv6Address,
+        'counter', 'drop',
+        'comment', `"${comment}-ip6"`,
+      ]);
+    }
     if (target.macAddress) {
+      // `ether saddr` matches at the link layer, so this one rule already
+      // blocks the device on both IPv4 and IPv6 traffic — no v6 variant needed.
       await this.run([
         'add', 'rule', 'inet', TABLE, FORWARD_CHAIN,
         'ether', 'saddr', target.macAddress,
@@ -120,43 +162,108 @@ class NftablesController {
     ]);
   }
 
+  async ensureDnsRedirectV6(dnsRedirectIpv6) {
+    await this.run(['add', 'table', 'ip6', NAT_TABLE_V6], { ignoreFailure: true });
+    await this.run(
+      [
+        'add', 'chain', 'ip6', NAT_TABLE_V6, NAT_CHAIN,
+        '{', 'type', 'nat', 'hook', 'prerouting', 'priority', '-100', ';', '}',
+      ],
+      { ignoreFailure: true },
+    );
+    await this.run(['flush', 'chain', 'ip6', NAT_TABLE_V6, NAT_CHAIN]);
+    await this.run([
+      'add', 'rule', 'ip6', NAT_TABLE_V6, NAT_CHAIN,
+      'udp', 'dport', '53', 'dnat', 'to', dnsRedirectIpv6,
+    ]);
+    await this.run([
+      'add', 'rule', 'ip6', NAT_TABLE_V6, NAT_CHAIN,
+      'tcp', 'dport', '53', 'dnat', 'to', dnsRedirectIpv6,
+    ]);
+  }
+
   /** Layer 5: drops known VPN protocol ports + endpoint IP ranges for one device. */
   async addVpnBlockRules(target) {
-    if (!target.ipAddress) return;
+    if (!target.ipAddress && !target.ipv6Address) return;
     const comment = `guardtime-vpn-${target.deviceId}`.slice(0, 50);
 
     for (const sig of VPN_PORT_SIGNATURES) {
-      await this.run([
-        'add', 'rule', 'inet', TABLE, FORWARD_CHAIN,
-        'ip', 'saddr', target.ipAddress,
-        sig.protocol, 'dport', String(sig.port),
-        'counter', 'drop',
-        'comment', `"${comment}-port-${sig.port}"`,
-      ]);
+      if (target.ipAddress) {
+        await this.run([
+          'add', 'rule', 'inet', TABLE, FORWARD_CHAIN,
+          'ip', 'saddr', target.ipAddress,
+          sig.protocol, 'dport', String(sig.port),
+          'counter', 'drop',
+          'comment', `"${comment}-port-${sig.port}"`,
+        ]);
+      }
+      if (this.config.enableIpv6 && target.ipv6Address) {
+        await this.run([
+          'add', 'rule', 'inet', TABLE, FORWARD_CHAIN,
+          'ip6', 'saddr', target.ipv6Address,
+          sig.protocol, 'dport', String(sig.port),
+          'counter', 'drop',
+          'comment', `"${comment}-port-${sig.port}-v6"`,
+        ]);
+      }
     }
 
-    for (const range of VPN_IP_RANGES) {
-      await this.run([
-        'add', 'rule', 'inet', TABLE, FORWARD_CHAIN,
-        'ip', 'saddr', target.ipAddress,
-        'ip', 'daddr', range.cidr,
-        'counter', 'drop',
-        'comment', `"${comment}-ip"`,
-      ]);
+    if (target.ipAddress) {
+      for (const range of VPN_IP_RANGES) {
+        await this.run([
+          'add', 'rule', 'inet', TABLE, FORWARD_CHAIN,
+          'ip', 'saddr', target.ipAddress,
+          'ip', 'daddr', range.cidr,
+          'counter', 'drop',
+          'comment', `"${comment}-ip"`,
+        ]);
+      }
     }
   }
 
   /** Adds a rule dropping outbound UDP/443 (QUIC / HTTP-3) — Layer 6. */
   async addQuicBlockRule(target) {
-    if (!target.ipAddress) return;
     const comment = `guardtime-quic-${target.deviceId}`.slice(0, 63);
-    await this.run([
-      'add', 'rule', 'inet', TABLE, FORWARD_CHAIN,
-      'ip', 'saddr', target.ipAddress,
-      'udp', 'dport', '443',
-      'counter', 'drop',
-      'comment', `"${comment}"`,
-    ]);
+    if (target.ipAddress) {
+      await this.run([
+        'add', 'rule', 'inet', TABLE, FORWARD_CHAIN,
+        'ip', 'saddr', target.ipAddress,
+        'udp', 'dport', '443',
+        'counter', 'drop',
+        'comment', `"${comment}"`,
+      ]);
+    }
+    if (this.config.enableIpv6 && target.ipv6Address) {
+      await this.run([
+        'add', 'rule', 'inet', TABLE, FORWARD_CHAIN,
+        'ip6', 'saddr', target.ipv6Address,
+        'udp', 'dport', '443',
+        'counter', 'drop',
+        'comment', `"${comment}-v6"`,
+      ]);
+    }
+  }
+
+  /**
+   * DoH/DoT protection (Layer 8): drops port 853 unconditionally (one rule
+   * covers both v4 and v6 traffic — `inet` family, no family-specific
+   * matcher needed for a port-only match) and drops known DoH provider IPs
+   * on 443. IP-list based, not SNI/DPI — see doh-dot-patterns.js.
+   */
+  async addDohDotBlockRules() {
+    for (const port of DOT_PORTS) {
+      await this.run(['add', 'rule', 'inet', TABLE, FORWARD_CHAIN, 'tcp', 'dport', String(port), 'counter', 'drop', 'comment', '"guardtime-dot-tcp"']);
+      await this.run(['add', 'rule', 'inet', TABLE, FORWARD_CHAIN, 'udp', 'dport', String(port), 'counter', 'drop', 'comment', '"guardtime-dot-udp"']);
+    }
+    for (const provider of DOH_PROVIDER_IPS) {
+      await this.run([
+        'add', 'rule', 'inet', TABLE, FORWARD_CHAIN,
+        'ip', 'daddr', provider.ip,
+        'tcp', 'dport', '443',
+        'counter', 'drop',
+        'comment', `"guardtime-doh-${provider.name}"`,
+      ]);
+    }
   }
 
   async snapshotRuleset() {
