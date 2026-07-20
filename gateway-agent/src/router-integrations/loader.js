@@ -26,6 +26,11 @@ function loadPlugin(pluginId, logger) {
       assertImplementsPluginInterface(OpenWrtPlugin, 'openwrt');
       return OpenWrtPlugin;
     }
+    case 'unifi': {
+      const { UniFiPlugin } = require('./unifi');
+      assertImplementsPluginInterface(UniFiPlugin, 'unifi');
+      return UniFiPlugin;
+    }
     default:
       if (logger && pluginId) {
         logger.debug('router plugin loader: no implemented plugin for pluginId, using guide-only fallback', { pluginId });

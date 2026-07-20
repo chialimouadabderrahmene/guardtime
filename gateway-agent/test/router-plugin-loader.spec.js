@@ -4,6 +4,7 @@ const { loadPlugin } = require('../src/router-integrations/loader');
 const { FritzBoxPlugin } = require('../src/router-integrations/fritzbox');
 const { MikroTikPlugin } = require('../src/router-integrations/mikrotik');
 const { OpenWrtPlugin } = require('../src/router-integrations/openwrt');
+const { UniFiPlugin } = require('../src/router-integrations/unifi');
 const { GuideOnlyPlugin } = require('../src/router-integrations/guide-only');
 
 function fakeLogger() {
@@ -15,10 +16,10 @@ describe('loadPlugin', () => {
     expect(loadPlugin('fritzbox')).toBe(FritzBoxPlugin);
     expect(loadPlugin('mikrotik')).toBe(MikroTikPlugin);
     expect(loadPlugin('openwrt')).toBe(OpenWrtPlugin);
+    expect(loadPlugin('unifi')).toBe(UniFiPlugin);
   });
 
   it('falls back to GuideOnlyPlugin for a documented-but-unimplemented vendor', () => {
-    expect(loadPlugin('unifi')).toBe(GuideOnlyPlugin);
     expect(loadPlugin('edgerouter')).toBe(GuideOnlyPlugin);
     expect(loadPlugin('glinet')).toBe(GuideOnlyPlugin);
   });
