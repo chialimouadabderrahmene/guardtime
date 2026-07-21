@@ -163,6 +163,28 @@ const UniFiPlugin = {
     }
   },
 
+  /**
+   * Real session teardown — POST /api/auth/logout (UniFi OS) or POST
+   * /api/logout (legacy controller), both documented alongside their
+   * matching login path in the same controller API family login() uses.
+   */
+  async logout(ctx) {
+    try {
+      const session = await login(ctx);
+      const path = session.unifiOs ? '/api/auth/logout' : '/api/logout';
+      const response = await fetch(`${originUrl(ctx)}${path}`, {
+        method: 'POST',
+        headers: { Cookie: session.cookie, ...(session.csrfToken ? { 'X-CSRF-Token': session.csrfToken } : {}) },
+        signal: AbortSignal.timeout(8000),
+      });
+      return response.ok
+        ? { success: true, message: 'UniFi session logged out' }
+        : { success: false, message: `logout failed (status ${response.status})` };
+    } catch (err) {
+      return { success: false, message: `logout failed: ${err.message}` };
+    }
+  },
+
   async changeDNS(ctx, { dnsServer }) {
     const dry = dryRunResult(ctx, `set network DNS server to ${dnsServer}`);
     if (dry) return dry;

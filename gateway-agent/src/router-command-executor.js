@@ -21,6 +21,18 @@ const STRATEGY_INVERSE_METHOD = {
   BLOCK_MAC: 'unblockMAC',
 };
 
+// Same strategy names as STRATEGY_METHOD above, mapped to their inverse
+// action — used by BLOCK_DEVICE/UNBLOCK_DEVICE (see runMultiStrategyAction
+// below), which is deliberately a DIFFERENT runner from
+// runEndGamingSession: for a persistent block, losing connectivity to the
+// device IS success, not a failure to roll back from, so there is no
+// post-action connectivity check here.
+const UNBLOCK_STRATEGY_METHOD = {
+  PAUSE_DEVICE: 'resumeDevice',
+  APPLY_FIREWALL_RULE: 'removeFirewallRule',
+  BLOCK_MAC: 'unblockMAC',
+};
+
 const COMMAND_METHOD = {
   TEST_CONNECTION: 'testConnection',
   CHANGE_DNS: 'changeDNS',
@@ -130,6 +142,31 @@ class RouterCommandExecutor {
     return { success: false, strategyUsed: null, attempts };
   }
 
+  /**
+   * Tries each strategy in priority order and stops at the first success —
+   * no connectivity check/rollback (unlike runEndGamingSession), since for
+   * BLOCK_DEVICE losing connectivity to the target IS the goal, and for
+   * UNBLOCK_DEVICE regaining it IS the goal. Each plugin method already
+   * self-verifies before reporting success:true (the plugin-interface
+   * safety contract), so no separate verification step is needed here.
+   */
+  async runMultiStrategyAction(plugin, ctx, { strategies }, methodMap, target) {
+    const attempts = [];
+
+    for (const strategy of strategies) {
+      const methodName = methodMap[strategy];
+      if (!methodName) continue;
+
+      const result = await this.executeSingleAction(plugin, ctx, methodName, target);
+      attempts.push({ strategy, ...result });
+      if (result.success) {
+        return { success: true, strategyUsed: strategy, attempts };
+      }
+    }
+
+    return { success: false, strategyUsed: null, attempts };
+  }
+
   async executeCommand(command, routerConnection) {
     if (command.type === 'DETECT') {
       const detection = await discoverRouter(this.config, this.logger);
@@ -168,6 +205,16 @@ class RouterCommandExecutor {
       );
     }
 
+    if (command.type === 'BLOCK_DEVICE') {
+      const target = this.buildTarget(command.deviceId, payload);
+      return this.runMultiStrategyAction(plugin, ctx, { strategies: payload.strategies || [] }, STRATEGY_METHOD, target);
+    }
+
+    if (command.type === 'UNBLOCK_DEVICE') {
+      const target = this.buildTarget(command.deviceId, payload);
+      return this.runMultiStrategyAction(plugin, ctx, { strategies: payload.strategies || [] }, UNBLOCK_STRATEGY_METHOD, target);
+    }
+
     const methodName = COMMAND_METHOD[command.type];
     if (!methodName) {
       return { success: false, message: `unsupported command type: ${command.type}` };
@@ -195,4 +242,4 @@ class RouterCommandExecutor {
   }
 }
 
-module.exports = { RouterCommandExecutor, STRATEGY_METHOD, STRATEGY_INVERSE_METHOD, COMMAND_METHOD };
+module.exports = { RouterCommandExecutor, STRATEGY_METHOD, STRATEGY_INVERSE_METHOD, UNBLOCK_STRATEGY_METHOD, COMMAND_METHOD };

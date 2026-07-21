@@ -278,4 +278,25 @@ describe('OpenWrtPlugin', () => {
     expect(result.message).toMatch(/^\[dry-run\]/);
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  it('logout calls session.destroy and reports the real rc', async () => {
+    mockUbus({
+      dispatch: (object, method) => (object === 'session' && method === 'destroy' ? { rc: 0, data: {} } : { rc: -1, data: {} }),
+    });
+    const result = await OpenWrtPlugin.logout(baseCtx());
+    expect(result).toEqual({ success: true, message: 'ubus session destroyed' });
+  });
+
+  it('logout reports failure when session.destroy returns a non-zero rc', async () => {
+    mockUbus({ dispatch: () => ({ rc: 6, data: {} }) });
+    const result = await OpenWrtPlugin.logout(baseCtx());
+    expect(result.success).toBe(false);
+  });
+
+  it('health reuses the unauthenticated ubus list probe, distinct from testConnection', async () => {
+    mockUbus({});
+    const result = await OpenWrtPlugin.health(baseCtx());
+    expect(result.success).toBe(true);
+    expect(result.detail).toMatch(/\d+ms/);
+  });
 });

@@ -18,9 +18,14 @@ jest.mock('../src/fingerprint', () => ({
   enrichWithFingerprint: jest.fn((devices) => Promise.resolve(devices)),
 }));
 
+jest.mock('../src/token-rotation', () => ({
+  applyRotatedToken: jest.fn().mockResolvedValue(undefined),
+}));
+
 const { syncOnce, summarize } = require('../src/main');
 const { Metrics } = require('../src/metrics');
 const logger = require('../src/logger');
+const { applyRotatedToken } = require('../src/token-rotation');
 
 function buildDeps({ devices = [], vpnDetections = [], dohDetections = [] } = {}) {
   return {
@@ -71,6 +76,7 @@ describe('syncOnce', () => {
     jest.spyOn(logger, 'info').mockImplementation(() => {});
     jest.spyOn(logger, 'warn').mockImplementation(() => {});
     jest.spyOn(logger, 'error').mockImplementation(() => {});
+    applyRotatedToken.mockClear();
   });
 
   afterEach(() => {
@@ -212,5 +218,23 @@ describe('syncOnce', () => {
     deps.routerCommandExecutor.sync = jest.fn().mockRejectedValue(new Error('backend unreachable'));
     await expect(syncOnce(deps)).resolves.not.toThrow();
     expect(logger.warn).toHaveBeenCalledWith('router command sync failed', { error: 'backend unreachable' });
+  });
+
+  it('applies a rotated token when the policy response includes one', async () => {
+    const deps = buildDeps();
+    deps.backend.getPolicies = jest.fn().mockResolvedValue({ devices: [], rotatedToken: 'new-tok' });
+
+    await syncOnce(deps);
+
+    expect(applyRotatedToken).toHaveBeenCalledWith(
+      expect.objectContaining({ backend: deps.backend, config: deps.config }),
+      'new-tok',
+    );
+  });
+
+  it('does not call applyRotatedToken when the policy response has no rotatedToken', async () => {
+    const deps = buildDeps();
+    await syncOnce(deps);
+    expect(applyRotatedToken).not.toHaveBeenCalled();
   });
 });

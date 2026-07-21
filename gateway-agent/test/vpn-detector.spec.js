@@ -1,6 +1,6 @@
 'use strict';
 
-const { VpnDetector } = require('../src/vpn-detector');
+const { VpnDetector, computeConfidence, detectFlowAnomaly } = require('../src/vpn-detector');
 const { Metrics } = require('../src/metrics');
 
 function fakeLogger() {
@@ -38,7 +38,9 @@ describe('VpnDetector.sync', () => {
 
     const report = await detector.sync([target()]);
 
-    expect(report).toEqual([{ deviceId: 'dev-1', method: 'port-signature', provider: 'WireGuard', detail: '51820' }]);
+    expect(report).toEqual([
+      { deviceId: 'dev-1', method: 'port-signature', provider: 'WireGuard', detail: '51820', confidence: 90, overallConfidence: 90 },
+    ]);
     expect(metrics.snapshot()['vpnDetector.detections']).toBe(1);
   });
 
@@ -49,11 +51,12 @@ describe('VpnDetector.sync', () => {
 
     const report = await detector.sync([target()]);
 
-    // This flow matches BOTH the Cloudflare WARP IP range and its port signature.
+    // This flow matches BOTH the Cloudflare WARP IP range (85) and its port signature (80);
+    // noisy-OR combination: 1 - (1-0.85)(1-0.80) = 0.97 -> 97.
     expect(report).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ method: 'ip-range', provider: 'Cloudflare WARP', detail: '162.159.192.10' }),
-        expect.objectContaining({ method: 'port-signature', provider: 'Cloudflare WARP', detail: '2408' }),
+        expect.objectContaining({ method: 'ip-range', provider: 'Cloudflare WARP', detail: '162.159.192.10', confidence: 85, overallConfidence: 97 }),
+        expect.objectContaining({ method: 'port-signature', provider: 'Cloudflare WARP', detail: '2408', confidence: 80, overallConfidence: 97 }),
       ]),
     );
     expect(report).toHaveLength(2);
@@ -64,7 +67,9 @@ describe('VpnDetector.sync', () => {
 
     const report = await detector.sync([target()]);
 
-    expect(report).toEqual([{ deviceId: 'dev-1', method: 'dns-pattern', provider: 'NordVPN', detail: 'api.nordvpn.com' }]);
+    expect(report).toEqual([
+      { deviceId: 'dev-1', method: 'dns-pattern', provider: 'NordVPN', detail: 'api.nordvpn.com', confidence: 85, overallConfidence: 85 },
+    ]);
   });
 
   it('returns no detections for ordinary traffic', async () => {
@@ -82,7 +87,7 @@ describe('VpnDetector.sync', () => {
     await detector.sync([target()]);
     expect(logger.warn).toHaveBeenCalledWith(
       'vpn detected',
-      expect.objectContaining({ deviceId: 'dev-1', provider: 'Mullvad', method: 'dns-pattern' }),
+      expect.objectContaining({ deviceId: 'dev-1', provider: 'Mullvad', method: 'dns-pattern', confidence: 85, overallConfidence: 85 }),
     );
   });
 
@@ -95,7 +100,9 @@ describe('VpnDetector.sync', () => {
     const detector = new VpnDetector({ conntrack, dnsSniff, metrics: new Metrics(), logger: fakeLogger() });
 
     const report = await detector.sync([target()]);
-    expect(report).toEqual([{ deviceId: 'dev-1', method: 'dns-pattern', provider: 'Mullvad', detail: 'mullvad.net' }]);
+    expect(report).toEqual([
+      { deviceId: 'dev-1', method: 'dns-pattern', provider: 'Mullvad', detail: 'mullvad.net', confidence: 85, overallConfidence: 85 },
+    ]);
   });
 
   it('detects independently across multiple devices', async () => {
@@ -113,7 +120,9 @@ describe('VpnDetector.sync', () => {
       target({ deviceId: 'dev-2', ipAddress: '192.168.1.51' }),
     ]);
 
-    expect(report).toEqual([{ deviceId: 'dev-1', method: 'port-signature', provider: 'OpenVPN', detail: '1194' }]);
+    expect(report).toEqual([
+      { deviceId: 'dev-1', method: 'port-signature', provider: 'OpenVPN', detail: '1194', confidence: 90, overallConfidence: 90 },
+    ]);
   });
 
   it('flags a TCP port-signature match (e.g. PPTP) from a TCP conntrack flow', async () => {
@@ -123,7 +132,9 @@ describe('VpnDetector.sync', () => {
 
     const report = await detector.sync([target()]);
 
-    expect(report).toEqual([{ deviceId: 'dev-1', method: 'port-signature', provider: 'PPTP', detail: '1723' }]);
+    expect(report).toEqual([
+      { deviceId: 'dev-1', method: 'port-signature', provider: 'PPTP', detail: '1723', confidence: 80, overallConfidence: 80 },
+    ]);
   });
 
   it('flags a low-confidence detection-only match (e.g. a SOCKS proxy port) distinctly from a high-confidence one', async () => {
@@ -134,7 +145,7 @@ describe('VpnDetector.sync', () => {
     const report = await detector.sync([target()]);
 
     expect(report).toEqual([
-      { deviceId: 'dev-1', method: 'port-signature-low-confidence', provider: 'SOCKS proxy', detail: '1080' },
+      { deviceId: 'dev-1', method: 'port-signature-low-confidence', provider: 'SOCKS proxy', detail: '1080', confidence: 30, overallConfidence: 30 },
     ]);
   });
 
@@ -146,5 +157,97 @@ describe('VpnDetector.sync', () => {
     const report = await detector.sync([target()]);
 
     expect(report).toEqual([]);
+  });
+
+  it('flags a weak flow-heuristic signal (3+ distinct peers on one non-standard UDP port) at low confidence', async () => {
+    const { detector } = buildDetector({
+      udpFlows: [
+        { src: '192.168.1.50', dst: '1.1.1.1', sport: 1, dport: 7000 },
+        { src: '192.168.1.50', dst: '2.2.2.2', sport: 1, dport: 7000 },
+        { src: '192.168.1.50', dst: '3.3.3.3', sport: 1, dport: 7000 },
+      ],
+    });
+
+    const report = await detector.sync([target()]);
+
+    expect(report).toEqual([
+      {
+        deviceId: 'dev-1',
+        method: 'flow-heuristic',
+        provider: 'unknown (multi-peer UDP pattern)',
+        detail: 'port 7000, 3 distinct peers',
+        weight: 25,
+        confidence: 25,
+        overallConfidence: 25,
+      },
+    ]);
+  });
+});
+
+describe('computeConfidence', () => {
+  it('returns 0 for no signals', () => {
+    expect(computeConfidence([])).toBe(0);
+  });
+
+  it('returns the raw weight for a single signal', () => {
+    expect(computeConfidence([90])).toBe(90);
+    expect(computeConfidence([25])).toBe(25);
+  });
+
+  it('combines multiple signals via noisy-OR, always rising but never exceeding 100', () => {
+    // 1 - (1-0.85)(1-0.80) = 0.97 -> 97
+    expect(computeConfidence([85, 80])).toBe(97);
+    // 1 - (1-0.90)(1-0.90)(1-0.90) = 0.999 -> 100
+    expect(computeConfidence([90, 90, 90])).toBe(100);
+  });
+
+  it('never exceeds 100 even with many strong signals', () => {
+    expect(computeConfidence([95, 95, 95, 95, 95])).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('detectFlowAnomaly', () => {
+  it('returns null when there are fewer than 3 distinct peers on any single non-standard port', () => {
+    const flows = [
+      { dst: '1.1.1.1', dport: 7000 },
+      { dst: '2.2.2.2', dport: 7000 },
+    ];
+    expect(detectFlowAnomaly(flows)).toBeNull();
+  });
+
+  it('flags 3+ distinct peers on the same non-standard port', () => {
+    const flows = [
+      { dst: '1.1.1.1', dport: 7000 },
+      { dst: '2.2.2.2', dport: 7000 },
+      { dst: '3.3.3.3', dport: 7000 },
+    ];
+    const result = detectFlowAnomaly(flows);
+    expect(result).toEqual({
+      method: 'flow-heuristic',
+      provider: 'unknown (multi-peer UDP pattern)',
+      detail: 'port 7000, 3 distinct peers',
+      weight: 25,
+    });
+  });
+
+  it('excludes common multi-destination service ports (DNS, DHCP, NTP, HTTPS/QUIC, mDNS)', () => {
+    const flows = [
+      { dst: '1.1.1.1', dport: 443 },
+      { dst: '2.2.2.2', dport: 443 },
+      { dst: '3.3.3.3', dport: 443 },
+      { dst: '4.4.4.4', dport: 53 },
+      { dst: '5.5.5.5', dport: 53 },
+      { dst: '6.6.6.6', dport: 53 },
+    ];
+    expect(detectFlowAnomaly(flows)).toBeNull();
+  });
+
+  it('treats different ports independently — peers spread across ports do not combine', () => {
+    const flows = [
+      { dst: '1.1.1.1', dport: 7000 },
+      { dst: '2.2.2.2', dport: 7001 },
+      { dst: '3.3.3.3', dport: 7002 },
+    ];
+    expect(detectFlowAnomaly(flows)).toBeNull();
   });
 });

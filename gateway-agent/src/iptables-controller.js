@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { VPN_PORT_SIGNATURES, VPN_IP_RANGES } = require('./vpn-patterns');
 const { DOH_PROVIDER_IPS, DOT_PORTS } = require('./doh-dot-patterns');
+const { buildFirewallSyncSignature } = require('./firewall-sync-signature');
 const execFileAsync = promisify(execFile);
 
 const FILTER_CHAIN = 'GUARDTIME_BLOCK';
@@ -17,6 +18,9 @@ class IptablesController {
   constructor(config, logger) {
     this.config = config;
     this.logger = logger;
+    // Keyed by the `ipv6` boolean — v4 and v6 passes rebuild independently,
+    // so each needs its own "did anything change since last cycle" memory.
+    this._lastSyncSignatures = new Map();
   }
 
   /**
@@ -55,6 +59,12 @@ class IptablesController {
   }
 
   async syncFamily({ targets, dnsRedirectIp, enableDnsRedirect, enableQuicBlockGlobal, enableDohBlock, ipv6 }) {
+    const signature = buildFirewallSyncSignature({ targets, dnsRedirectIp, enableDnsRedirect, enableQuicBlockGlobal, enableDohBlock, enableIpv6: ipv6 });
+    if (this._lastSyncSignatures.get(ipv6) === signature) {
+      this.logger.debug(`${ipv6 ? 'ip6tables' : 'iptables'} sync skipped — policy unchanged since last cycle`);
+      return;
+    }
+
     const snapshot = await this.snapshotRuleset(ipv6);
     try {
       await this.ensureFilterChain(ipv6);
@@ -79,6 +89,8 @@ class IptablesController {
       if (enableDnsRedirect) {
         await this.ensureDnsRedirect(dnsRedirectIp, ipv6);
       }
+
+      this._lastSyncSignatures.set(ipv6, signature);
     } catch (err) {
       this.logger.error(`${ipv6 ? 'ip6tables' : 'iptables'} sync failed, rolling back to prior ruleset`, {
         error: err.message,
@@ -157,7 +169,8 @@ class IptablesController {
     }
 
     if (!ipv6) {
-      for (const provider of DOH_PROVIDER_IPS) {
+      const reputationProviders = (this.config.dohReputationIps || []).map((ip) => ({ ip, name: 'operator-reputation-list' }));
+      for (const provider of [...DOH_PROVIDER_IPS, ...reputationProviders]) {
         await this.run(
           ['-A', DOH_CHAIN, '-d', provider.ip, '-p', 'tcp', '--dport', '443', '-m', 'comment', '--comment', `guardtime-doh:${provider.name}`, '-j', 'DROP'],
           { ipv6 },

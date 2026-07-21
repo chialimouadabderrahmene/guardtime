@@ -13,6 +13,14 @@ describe('lookupVendor', () => {
     expect(lookupVendor('b8:27:eb:11:22:33')).toBe('Raspberry Pi Foundation');
   });
 
+  it('resolves the router-vendor OUIs added for the integration expansion', () => {
+    expect(lookupVendor('00:1d:aa:11:22:33')).toBe('DrayTek');
+    expect(lookupVendor('00:11:32:11:22:33')).toBe('Synology');
+    expect(lookupVendor('00:16:01:11:22:33')).toBe('Buffalo');
+    expect(lookupVendor('00:e0:fc:11:22:33')).toBe('Huawei');
+    expect(lookupVendor('4c:1f:cc:11:22:33')).toBe('Huawei');
+  });
+
   it('returns null for an unrecognized prefix (non-exhaustive table)', () => {
     expect(lookupVendor('00:00:00:00:00:00')).toBeNull();
   });

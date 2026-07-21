@@ -136,6 +136,39 @@ const OpenWrtPlugin = {
     }
   },
 
+  /**
+   * Real session teardown — ubus's own `session.destroy` call, documented
+   * alongside `session.login` in the same rpcd `session` object. Since this
+   * project's login() is called fresh per method rather than cached, this
+   * logs in once purely to have a session id to destroy; still a genuine
+   * server-side session invalidation, not a no-op.
+   */
+  async logout(ctx) {
+    try {
+      const sid = await login(ctx);
+      const result = await ubusCall(ctx, sid, 'session', 'destroy', {});
+      return result.rc === 0
+        ? { success: true, message: 'ubus session destroyed' }
+        : { success: false, message: `session.destroy returned rc=${result.rc}` };
+    } catch (err) {
+      return { success: false, message: `logout failed: ${err.message}` };
+    }
+  },
+
+  /** Cheap, unauthenticated reachability probe — same call detect() uses, distinct from the authenticated testConnection() above. */
+  async health(ctx) {
+    const startedAt = Date.now();
+    try {
+      const result = await ubusList(ctx);
+      const latencyMs = Date.now() - startedAt;
+      return result && result.jsonrpc
+        ? { success: true, message: 'ubus endpoint reachable', detail: `${latencyMs}ms` }
+        : { success: false, message: 'unexpected response from /ubus', detail: `${latencyMs}ms` };
+    } catch (err) {
+      return { success: false, message: `health check failed: ${err.message}` };
+    }
+  },
+
   async changeDNS(ctx, { dnsServer }) {
     const dry = dryRunResult(ctx, `set WAN DNS to ${dnsServer}`);
     if (dry) return dry;

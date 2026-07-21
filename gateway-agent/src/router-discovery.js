@@ -8,6 +8,20 @@
 // single best-guess {vendor, model, firmwareVersion, detectionMethod,
 // confidence} result, most-confident signal wins. An unrecognized/silent
 // router yields vendor:null rather than a guess.
+//
+// DHCP Vendor Class (Option 60) is deliberately NOT used as a router-
+// identification signal here: Option 60 is sent by a DHCP CLIENT to
+// identify itself to a server, so it would only reveal something about the
+// router if this agent could see the router acting as a DHCP client toward
+// its ISP — i.e. sniffing the WAN link, not the LAN this agent runs on.
+// From this agent's actual vantage point (behind the router, on the LAN it
+// serves), the only DHCP traffic visible is the router's own DHCP SERVER
+// handing out LAN leases, which is genuinely useful for identifying LAN
+// CLIENT devices (see dhcp-leases.js, used by the client-fingerprinting
+// pipeline) but says nothing about the router's own vendor. Claiming
+// "DHCP Vendor Class" as a router-detection signal without that access
+// would be exactly the kind of invented-capability this project's plugins
+// are held to avoid.
 
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
@@ -101,11 +115,33 @@ function identifyVendorFromText(text) {
   if (/OpenWrt|LuCI/i.test(text)) return 'OpenWrt';
   if (/UniFi|Ubiquiti/i.test(text)) return 'Ubiquiti';
   if (/GL\.iNet/i.test(text)) return 'GL.iNet';
+  if (/DrayTek|Vigor\d/i.test(text)) return 'DrayTek';
+  if (/Keenetic/i.test(text)) return 'Keenetic';
+  if (/Linksys/i.test(text)) return 'Linksys';
+  if (/\bOmada\b/i.test(text)) return 'TP-Link';
+  if (/TP-Link|Deco|Archer(?:\s|$)/i.test(text)) return 'TP-Link';
   if (/ASUS|ASUSWRT/i.test(text)) return 'ASUS';
   if (/NETGEAR/i.test(text)) return 'Netgear';
   if (/D-Link/i.test(text)) return 'D-Link';
-  if (/Linksys/i.test(text)) return 'Linksys';
+  if (/Belkin/i.test(text)) return 'Belkin';
   if (/Synology/i.test(text)) return 'Synology';
+  if (/Nebula|Zyxel/i.test(text)) return 'Zyxel';
+  if (/Cisco/i.test(text)) return 'Cisco';
+  if (/Buffalo|AirStation/i.test(text)) return 'Buffalo';
+  if (/Mercusys/i.test(text)) return 'Mercusys';
+  if (/\bTenda\b/i.test(text)) return 'Tenda';
+  if (/Xiaomi|MiWifi|Redmi/i.test(text)) return 'Xiaomi';
+  if (/Huawei/i.test(text)) return 'Huawei';
+  if (/TOTOLINK/i.test(text)) return 'TOTOLINK';
+  if (/Sercomm/i.test(text)) return 'Sercomm';
+  if (/Actiontec/i.test(text)) return 'Actiontec';
+  if (/Hitron/i.test(text)) return 'Hitron';
+  if (/Comtrend/i.test(text)) return 'Comtrend';
+  if (/\bNokia\b/i.test(text)) return 'Nokia';
+  if (/Sagemcom/i.test(text)) return 'Sagemcom';
+  if (/Technicolor/i.test(text)) return 'Technicolor';
+  if (/Arris/i.test(text)) return 'Arris';
+  if (/Arcadyan/i.test(text)) return 'Arcadyan';
   return null;
 }
 

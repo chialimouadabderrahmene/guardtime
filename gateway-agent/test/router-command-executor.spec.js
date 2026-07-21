@@ -220,6 +220,121 @@ describe('RouterCommandExecutor.runEndGamingSession (via executeCommand)', () =>
   });
 });
 
+describe('RouterCommandExecutor.runMultiStrategyAction (BLOCK_DEVICE/UNBLOCK_DEVICE via executeCommand)', () => {
+  beforeEach(() => {
+    loadPlugin.mockReset();
+  });
+
+  it('BLOCK_DEVICE stops at the first strategy that succeeds, with no connectivity check/rollback', async () => {
+    const plugin = {
+      pauseDevice: jest.fn().mockResolvedValue({ success: true, message: 'blocked' }),
+      resumeDevice: jest.fn(),
+    };
+    loadPlugin.mockReturnValue(plugin);
+    const { executor } = buildExecutor();
+    executor.checkConnectivity = jest.fn();
+
+    const command = {
+      id: 'cmd-1',
+      type: 'BLOCK_DEVICE',
+      deviceId: 'dev-1',
+      payload: JSON.stringify({ deviceId: 'dev-1', strategies: ['PAUSE_DEVICE', 'BLOCK_MAC'] }),
+    };
+
+    const result = await executor.executeCommand(command, { pluginId: 'mikrotik', ipAddress: '192.168.88.1' });
+
+    expect(result).toEqual({
+      success: true,
+      strategyUsed: 'PAUSE_DEVICE',
+      attempts: [{ strategy: 'PAUSE_DEVICE', success: true, message: 'blocked' }],
+    });
+    expect(plugin.resumeDevice).not.toHaveBeenCalled();
+    expect(executor.checkConnectivity).not.toHaveBeenCalled();
+  });
+
+  it('BLOCK_DEVICE falls through to the next strategy when the first fails', async () => {
+    const plugin = {
+      pauseDevice: jest.fn().mockResolvedValue({ success: false, message: 'not supported' }),
+      blockMAC: jest.fn().mockResolvedValue({ success: true, message: 'mac blocked' }),
+    };
+    loadPlugin.mockReturnValue(plugin);
+    const { executor } = buildExecutor();
+
+    const command = {
+      id: 'cmd-1',
+      type: 'BLOCK_DEVICE',
+      deviceId: 'dev-1',
+      payload: JSON.stringify({ deviceId: 'dev-1', strategies: ['PAUSE_DEVICE', 'BLOCK_MAC'] }),
+    };
+
+    const result = await executor.executeCommand(command, { pluginId: 'mikrotik' });
+
+    expect(result.success).toBe(true);
+    expect(result.strategyUsed).toBe('BLOCK_MAC');
+    expect(result.attempts).toHaveLength(2);
+  });
+
+  it('BLOCK_DEVICE reports overall failure when every strategy fails', async () => {
+    const plugin = {
+      pauseDevice: jest.fn().mockResolvedValue({ success: false, message: 'nope' }),
+      blockMAC: jest.fn().mockResolvedValue({ success: false, message: 'nope' }),
+    };
+    loadPlugin.mockReturnValue(plugin);
+    const { executor } = buildExecutor();
+
+    const command = {
+      id: 'cmd-1',
+      type: 'BLOCK_DEVICE',
+      deviceId: 'dev-1',
+      payload: JSON.stringify({ deviceId: 'dev-1', strategies: ['PAUSE_DEVICE', 'BLOCK_MAC'] }),
+    };
+
+    const result = await executor.executeCommand(command, { pluginId: 'mikrotik' });
+    expect(result.success).toBe(false);
+    expect(result.strategyUsed).toBeNull();
+  });
+
+  it('UNBLOCK_DEVICE calls the inverse method for each strategy (resumeDevice/removeFirewallRule/unblockMAC), not the block method', async () => {
+    const plugin = {
+      resumeDevice: jest.fn().mockResolvedValue({ success: true, message: 'resumed' }),
+      pauseDevice: jest.fn(),
+    };
+    loadPlugin.mockReturnValue(plugin);
+    const { executor } = buildExecutor();
+
+    const command = {
+      id: 'cmd-1',
+      type: 'UNBLOCK_DEVICE',
+      deviceId: 'dev-1',
+      payload: JSON.stringify({ deviceId: 'dev-1', strategies: ['PAUSE_DEVICE', 'BLOCK_MAC'] }),
+    };
+
+    const result = await executor.executeCommand(command, { pluginId: 'mikrotik' });
+
+    expect(result.success).toBe(true);
+    expect(result.strategyUsed).toBe('PAUSE_DEVICE');
+    expect(plugin.resumeDevice).toHaveBeenCalledTimes(1);
+    expect(plugin.pauseDevice).not.toHaveBeenCalled();
+  });
+
+  it('skips a strategy with no mapped method instead of throwing', async () => {
+    const plugin = { blockMAC: jest.fn().mockResolvedValue({ success: true, message: 'mac blocked' }) };
+    loadPlugin.mockReturnValue(plugin);
+    const { executor } = buildExecutor();
+
+    const command = {
+      id: 'cmd-1',
+      type: 'BLOCK_DEVICE',
+      deviceId: 'dev-1',
+      payload: JSON.stringify({ deviceId: 'dev-1', strategies: ['NOT_A_REAL_STRATEGY', 'BLOCK_MAC'] }),
+    };
+
+    const result = await executor.executeCommand(command, { pluginId: 'mikrotik' });
+    expect(result.success).toBe(true);
+    expect(result.strategyUsed).toBe('BLOCK_MAC');
+  });
+});
+
 describe('RouterCommandExecutor.sync', () => {
   beforeEach(() => {
     loadPlugin.mockReset();

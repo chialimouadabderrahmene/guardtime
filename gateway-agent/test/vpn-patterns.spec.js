@@ -3,18 +3,18 @@
 const { matchVpnDomain, matchVpnPort, matchVpnPortDetectionOnly, matchVpnIp } = require('../src/vpn-patterns');
 
 describe('matchVpnDomain', () => {
-  it('matches an exact known VPN domain', () => {
-    expect(matchVpnDomain('nordvpn.com')).toBe('NordVPN');
-    expect(matchVpnDomain('mullvad.net')).toBe('Mullvad');
+  it('matches an exact known VPN domain and returns its weight', () => {
+    expect(matchVpnDomain('nordvpn.com')).toEqual({ provider: 'NordVPN', weight: 85 });
+    expect(matchVpnDomain('mullvad.net')).toEqual({ provider: 'Mullvad', weight: 85 });
   });
 
   it('matches a subdomain of a known VPN domain', () => {
-    expect(matchVpnDomain('api.nordvpn.com')).toBe('NordVPN');
-    expect(matchVpnDomain('engage.cloudflareclient.com')).toBe('Cloudflare WARP');
+    expect(matchVpnDomain('api.nordvpn.com').provider).toBe('NordVPN');
+    expect(matchVpnDomain('engage.cloudflareclient.com').provider).toBe('Cloudflare WARP');
   });
 
   it('is case-insensitive and tolerates a trailing dot', () => {
-    expect(matchVpnDomain('NordVPN.COM.')).toBe('NordVPN');
+    expect(matchVpnDomain('NordVPN.COM.').provider).toBe('NordVPN');
   });
 
   it('does not match an unrelated domain (non-exhaustive by design)', () => {
@@ -31,10 +31,10 @@ describe('matchVpnDomain', () => {
 });
 
 describe('matchVpnPort', () => {
-  it('matches known VPN protocol ports', () => {
-    expect(matchVpnPort('udp', 51820)).toBe('WireGuard');
-    expect(matchVpnPort('udp', 1194)).toBe('OpenVPN');
-    expect(matchVpnPort('udp', 500)).toBe('IKEv2/IPsec');
+  it('matches known VPN protocol ports and returns their weight', () => {
+    expect(matchVpnPort('udp', 51820)).toEqual({ provider: 'WireGuard', weight: 90 });
+    expect(matchVpnPort('udp', 1194)).toEqual({ provider: 'OpenVPN', weight: 90 });
+    expect(matchVpnPort('udp', 500).provider).toBe('IKEv2/IPsec');
   });
 
   it('does not match on the wrong protocol', () => {
@@ -46,21 +46,36 @@ describe('matchVpnPort', () => {
   });
 
   it('matches the expanded protocol signatures added for L2TP/PPTP/SoftEther/Outline/Tailscale/ZeroTier', () => {
-    expect(matchVpnPort('udp', 1701)).toBe('L2TP');
-    expect(matchVpnPort('tcp', 1723)).toBe('PPTP');
-    expect(matchVpnPort('tcp', 992)).toBe('SoftEther');
-    expect(matchVpnPort('tcp', 5555)).toBe('SoftEther');
-    expect(matchVpnPort('udp', 41194)).toBe('Outline (Shadowsocks, common default)');
-    expect(matchVpnPort('udp', 41641)).toBe('Tailscale');
-    expect(matchVpnPort('udp', 9993)).toBe('ZeroTier');
+    expect(matchVpnPort('udp', 1701).provider).toBe('L2TP');
+    expect(matchVpnPort('tcp', 1723).provider).toBe('PPTP');
+    expect(matchVpnPort('tcp', 992).provider).toBe('SoftEther');
+    expect(matchVpnPort('tcp', 5555).provider).toBe('SoftEther');
+    expect(matchVpnPort('udp', 41194).provider).toBe('Outline (Shadowsocks, common default)');
+    expect(matchVpnPort('udp', 41641).provider).toBe('Tailscale');
+    expect(matchVpnPort('udp', 9993).provider).toBe('ZeroTier');
+  });
+
+  it('every port-signature weight is within 0-100', () => {
+    const { VPN_PORT_SIGNATURES } = require('../src/vpn-patterns');
+    for (const sig of VPN_PORT_SIGNATURES) {
+      expect(sig.weight).toBeGreaterThan(0);
+      expect(sig.weight).toBeLessThanOrEqual(100);
+    }
   });
 });
 
 describe('matchVpnPortDetectionOnly', () => {
-  it('matches generic proxy ports, but only as a detection-only signal', () => {
-    expect(matchVpnPortDetectionOnly('tcp', 1080)).toBe('SOCKS proxy');
-    expect(matchVpnPortDetectionOnly('tcp', 3128)).toBe('HTTP/HTTPS proxy (Squid default)');
-    expect(matchVpnPortDetectionOnly('tcp', 8080)).toBe('HTTP/HTTPS proxy');
+  it('matches generic proxy ports, but only as a lower-weight detection-only signal', () => {
+    expect(matchVpnPortDetectionOnly('tcp', 1080)).toEqual({ provider: 'SOCKS proxy', weight: 30 });
+    expect(matchVpnPortDetectionOnly('tcp', 3128).provider).toBe('HTTP/HTTPS proxy (Squid default)');
+    expect(matchVpnPortDetectionOnly('tcp', 8080).provider).toBe('HTTP/HTTPS proxy');
+  });
+
+  it('detection-only weights are lower than every auto-block-eligible port weight', () => {
+    const { VPN_PORT_SIGNATURES, VPN_DETECTION_ONLY_PORT_SIGNATURES } = require('../src/vpn-patterns');
+    const minBlockWeight = Math.min(...VPN_PORT_SIGNATURES.map((s) => s.weight));
+    const maxDetectionOnlyWeight = Math.max(...VPN_DETECTION_ONLY_PORT_SIGNATURES.map((s) => s.weight));
+    expect(maxDetectionOnlyWeight).toBeLessThan(minBlockWeight);
   });
 
   it('deliberately does not match port 443 — see the module comment on why', () => {
@@ -74,13 +89,13 @@ describe('matchVpnPortDetectionOnly', () => {
 });
 
 describe('matchVpnIp', () => {
-  it('matches an IP inside a known VPN provider range', () => {
-    expect(matchVpnIp('162.159.192.10')).toBe('Cloudflare WARP');
+  it('matches an IP inside a known VPN provider range and returns its weight', () => {
+    expect(matchVpnIp('162.159.192.10')).toEqual({ provider: 'Cloudflare WARP', weight: 85 });
   });
 
   it('matches an IP inside the Tailscale CGNAT range', () => {
-    expect(matchVpnIp('100.64.1.5')).toBe('Tailscale');
-    expect(matchVpnIp('100.127.255.254')).toBe('Tailscale');
+    expect(matchVpnIp('100.64.1.5').provider).toBe('Tailscale');
+    expect(matchVpnIp('100.127.255.254').provider).toBe('Tailscale');
   });
 
   it('does not match an IP outside all known ranges', () => {

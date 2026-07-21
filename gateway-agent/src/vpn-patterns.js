@@ -11,37 +11,46 @@ const { ipInCidr } = require('./cidr');
  * documented CDN ranges, provider-run domains) are listed. A device using an
  * unlisted VPN/provider simply won't be detected — this is a real limitation,
  * not a placeholder.
+ *
+ * Every signature carries a `weight` (0-100): how strongly a single match
+ * on its own indicates a VPN, used by vpn-detector.js to build a confidence
+ * score instead of a binary yes/no. These are hand-assigned engineering
+ * judgment calls (documented per-entry below), not derived from any
+ * calibration dataset — there is no labeled traffic corpus available in
+ * this environment to fit real probabilities against. Treat the resulting
+ * scores as "how much signal fired," not a statistically calibrated
+ * probability of VPN use.
  */
 const VPN_DNS_PATTERNS = [
-  { suffix: 'nordvpn.com', provider: 'NordVPN' },
-  { suffix: 'nordvpn.net', provider: 'NordVPN' },
-  { suffix: 'protonvpn.com', provider: 'ProtonVPN' },
-  { suffix: 'protonvpn.net', provider: 'ProtonVPN' },
-  { suffix: 'surfshark.com', provider: 'Surfshark' },
-  { suffix: 'mullvad.net', provider: 'Mullvad' },
-  { suffix: 'cloudflareclient.com', provider: 'Cloudflare WARP' },
+  { suffix: 'nordvpn.com', provider: 'NordVPN', weight: 85 },
+  { suffix: 'nordvpn.net', provider: 'NordVPN', weight: 85 },
+  { suffix: 'protonvpn.com', provider: 'ProtonVPN', weight: 85 },
+  { suffix: 'protonvpn.net', provider: 'ProtonVPN', weight: 85 },
+  { suffix: 'surfshark.com', provider: 'Surfshark', weight: 85 },
+  { suffix: 'mullvad.net', provider: 'Mullvad', weight: 85 },
+  { suffix: 'cloudflareclient.com', provider: 'Cloudflare WARP', weight: 80 },
 ];
 
 // High-confidence: ports with no common legitimate non-VPN use on a home
 // network, so it's safe for these to feed BOTH detection and the firewall's
 // automatic block rule (addVpnBlockRules in iptables/nftables-controller.js).
 const VPN_PORT_SIGNATURES = [
-  { protocol: 'udp', port: 51820, provider: 'WireGuard' },
-  { protocol: 'udp', port: 1194, provider: 'OpenVPN' },
-  { protocol: 'tcp', port: 1194, provider: 'OpenVPN (TCP)' },
-  { protocol: 'udp', port: 500, provider: 'IKEv2/IPsec' },
-  { protocol: 'udp', port: 4500, provider: 'IKEv2/IPsec (NAT-T)' },
-  { protocol: 'udp', port: 2408, provider: 'Cloudflare WARP' },
+  { protocol: 'udp', port: 51820, provider: 'WireGuard', weight: 90 },
+  { protocol: 'udp', port: 1194, provider: 'OpenVPN', weight: 90 },
+  { protocol: 'tcp', port: 1194, provider: 'OpenVPN (TCP)', weight: 85 },
+  { protocol: 'udp', port: 500, provider: 'IKEv2/IPsec', weight: 75 },
+  { protocol: 'udp', port: 4500, provider: 'IKEv2/IPsec (NAT-T)', weight: 75 },
+  { protocol: 'udp', port: 2408, provider: 'Cloudflare WARP', weight: 80 },
   // L2TP itself is UDP/1701, but it's essentially always paired with IPsec
   // (500/4500 above), which fire first in practice. Still listed for a
   // client that doesn't negotiate full IPsec.
-  { protocol: 'udp', port: 1701, provider: 'L2TP' },
-  { protocol: 'tcp', port: 1723, provider: 'PPTP' },
-  { protocol: 'tcp', port: 992, provider: 'SoftEther' },
-  { protocol: 'tcp', port: 5555, provider: 'SoftEther' },
-  { protocol: 'udp', port: 41194, provider: 'Outline (Shadowsocks, common default)' },
-  { protocol: 'udp', port: 41641, provider: 'Tailscale' },
-  { protocol: 'udp', port: 9993, provider: 'ZeroTier' },
+  { protocol: 'udp', port: 1701, provider: 'L2TP', weight: 70 },
+  { protocol: 'tcp', port: 1723, provider: 'PPTP', weight: 80 },
+  { protocol: 'tcp', port: 992, provider: 'SoftEther', weight: 75 },
+  { protocol: 'tcp', port: 5555, provider: 'SoftEther', weight: 60 }, // 5555 collides with a few unrelated dev tools — slightly lower
+  { protocol: 'udp', port: 41194, provider: 'Outline (Shadowsocks, common default)', weight: 55 }, // Shadowsocks is designed to be unfingerprintable — port alone is weak
+  { protocol: 'udp', port: 41641, provider: 'Tailscale', weight: 85 },
+  { protocol: 'udp', port: 9993, provider: 'ZeroTier', weight: 85 },
 ];
 
 // Low-confidence / detection-only: these ports are shared with common
@@ -59,9 +68,9 @@ const VPN_PORT_SIGNATURES = [
 // SoftEther's HTTPS-camouflage mode needs actual TLS ClientHello
 // inspection, not a port list — see tls-fingerprint-detector.js.
 const VPN_DETECTION_ONLY_PORT_SIGNATURES = [
-  { protocol: 'tcp', port: 1080, provider: 'SOCKS proxy' },
-  { protocol: 'tcp', port: 3128, provider: 'HTTP/HTTPS proxy (Squid default)' },
-  { protocol: 'tcp', port: 8080, provider: 'HTTP/HTTPS proxy' },
+  { protocol: 'tcp', port: 1080, provider: 'SOCKS proxy', weight: 30 },
+  { protocol: 'tcp', port: 3128, provider: 'HTTP/HTTPS proxy (Squid default)', weight: 25 },
+  { protocol: 'tcp', port: 8080, provider: 'HTTP/HTTPS proxy', weight: 20 }, // extremely common for unrelated self-hosted apps too
 ];
 
 // Publicly documented, relatively stable ranges only (Cloudflare's WARP
@@ -69,40 +78,42 @@ const VPN_DETECTION_ONLY_PORT_SIGNATURES = [
 // stable ranges, so they are covered via DNS/port signatures instead, not
 // here.
 const VPN_IP_RANGES = [
-  { cidr: '162.159.192.0/24', provider: 'Cloudflare WARP' },
-  { cidr: '162.159.193.0/24', provider: 'Cloudflare WARP' },
+  { cidr: '162.159.192.0/24', provider: 'Cloudflare WARP', weight: 85 },
+  { cidr: '162.159.193.0/24', provider: 'Cloudflare WARP', weight: 85 },
   // Tailscale assigns every device a stable address in the shared CGNAT
   // range 100.64.0.0/10 (RFC 6598) — a device with active traffic to/from
   // this range is very likely tunneled through Tailscale's relay/direct
   // path, since almost nothing else legitimately uses this range on a
   // home network.
-  { cidr: '100.64.0.0/10', provider: 'Tailscale' },
+  { cidr: '100.64.0.0/10', provider: 'Tailscale', weight: 70 },
 ];
 
 function matchVpnDomain(domain) {
   if (!domain) return null;
   const normalized = domain.toLowerCase().replace(/\.$/, '');
   for (const pattern of VPN_DNS_PATTERNS) {
-    if (normalized === pattern.suffix || normalized.endsWith(`.${pattern.suffix}`)) return pattern.provider;
+    if (normalized === pattern.suffix || normalized.endsWith(`.${pattern.suffix}`)) {
+      return { provider: pattern.provider, weight: pattern.weight };
+    }
   }
   return null;
 }
 
 function matchVpnPort(protocol, port) {
   const match = VPN_PORT_SIGNATURES.find((sig) => sig.protocol === protocol && sig.port === port);
-  return match ? match.provider : null;
+  return match ? { provider: match.provider, weight: match.weight } : null;
 }
 
 /** Detection-only signal — never feeds the automatic firewall block rule. */
 function matchVpnPortDetectionOnly(protocol, port) {
   const match = VPN_DETECTION_ONLY_PORT_SIGNATURES.find((sig) => sig.protocol === protocol && sig.port === port);
-  return match ? match.provider : null;
+  return match ? { provider: match.provider, weight: match.weight } : null;
 }
 
 function matchVpnIp(ipAddress) {
   if (!ipAddress) return null;
   for (const range of VPN_IP_RANGES) {
-    if (ipInCidr(ipAddress, range.cidr)) return range.provider;
+    if (ipInCidr(ipAddress, range.cidr)) return { provider: range.provider, weight: range.weight };
   }
   return null;
 }

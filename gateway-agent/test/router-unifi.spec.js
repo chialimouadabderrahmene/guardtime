@@ -275,3 +275,33 @@ describe('UniFiPlugin changeDNS', () => {
     expect(result.message).toMatch(/could not locate/);
   });
 });
+
+describe('UniFiPlugin logout', () => {
+  beforeEach(() => {
+    delete global.fetch;
+  });
+
+  it('logs out via the UniFi OS logout path, carrying the session cookie + CSRF token', async () => {
+    const calls = mockFetch((url) => {
+      if (url.includes('/api/auth/login')) return { status: 200, body: {}, headers: UNIFI_OS_LOGIN_HEADERS };
+      if (url.includes('/api/auth/logout')) return { status: 200, body: {} };
+      return { status: 200, body: {} };
+    });
+
+    const result = await UniFiPlugin.logout(baseCtx());
+    expect(result).toEqual({ success: true, message: 'UniFi session logged out' });
+    const logoutCall = calls.find((c) => c.url.includes('/api/auth/logout'));
+    expect(logoutCall.options.headers.Cookie).toBe('TOKEN=abc123');
+    expect(logoutCall.options.headers['X-CSRF-Token']).toBe('csrf-xyz');
+  });
+
+  it('reports failure when the logout request itself fails', async () => {
+    mockFetch((url) => {
+      if (url.includes('/api/auth/login')) return { status: 200, body: {}, headers: UNIFI_OS_LOGIN_HEADERS };
+      return { status: 500, body: {} };
+    });
+
+    const result = await UniFiPlugin.logout(baseCtx());
+    expect(result.success).toBe(false);
+  });
+});

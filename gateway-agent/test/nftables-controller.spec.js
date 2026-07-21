@@ -264,3 +264,94 @@ describe('NftablesController', () => {
     expect(calls).toEqual([['list', 'ruleset']]);
   });
 });
+
+describe('NftablesController — skips an idempotent rebuild', () => {
+  beforeEach(() => {
+    execFile.mockReset();
+  });
+
+  const syncArgs = () => ({
+    targets: [{ deviceId: 'dev-1', action: 'BLOCK', ipAddress: '192.168.1.50', macAddress: 'AA:BB:CC:DD:EE:FF' }],
+    dnsRedirectIp: '10.0.0.1',
+    enableDnsRedirect: true,
+  });
+
+  it('makes zero execFile calls on a second sync with an unchanged policy', async () => {
+    const calls = mockExecFile();
+    const controller = new NftablesController(baseConfig(), fakeLogger());
+
+    await controller.sync(syncArgs());
+    const callsAfterFirst = calls.length;
+    expect(callsAfterFirst).toBeGreaterThan(0);
+
+    await controller.sync(syncArgs());
+    expect(calls.length).toBe(callsAfterFirst);
+  });
+
+  it('logs a debug message instead of shelling out when skipped', async () => {
+    mockExecFile();
+    const logger = fakeLogger();
+    const controller = new NftablesController(baseConfig(), logger);
+
+    await controller.sync(syncArgs());
+    await controller.sync(syncArgs());
+
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('sync skipped'));
+  });
+
+  it('rebuilds again once the policy actually changes', async () => {
+    const calls = mockExecFile();
+    const controller = new NftablesController(baseConfig(), fakeLogger());
+
+    await controller.sync(syncArgs());
+    const callsAfterFirst = calls.length;
+
+    await controller.sync({
+      ...syncArgs(),
+      targets: [...syncArgs().targets, { deviceId: 'dev-2', action: 'BLOCK', ipAddress: '192.168.1.51' }],
+    });
+
+    expect(calls.length).toBeGreaterThan(callsAfterFirst);
+  });
+
+  it('does not cache a signature after a failed sync — the next cycle retries in full', async () => {
+    let shouldFail = true;
+    const calls = mockExecFile({ fail: (args) => shouldFail && args[0] === 'add' && args[1] === 'rule' });
+    const controller = new NftablesController(baseConfig(), fakeLogger());
+
+    await expect(controller.sync(syncArgs())).rejects.toThrow();
+    const callsAfterFailedAttempt = calls.length;
+
+    shouldFail = false;
+    await controller.sync(syncArgs());
+    expect(calls.length).toBeGreaterThan(callsAfterFailedAttempt);
+  });
+
+  it('does not cache a signature when the v6 DNS-redirect sub-step fails, so it retries every cycle until it succeeds', async () => {
+    let v6ShouldFail = true;
+    const calls = mockExecFile({
+      fail: (args) => v6ShouldFail && args[0] === 'add' && args[2] === 'ip6' && args[3] === 'guardtime_nat6',
+    });
+    const controller = new NftablesController(baseConfig({ enableIpv6: true }), fakeLogger());
+
+    const args = { ...syncArgs(), dnsRedirectIpv6: '2001:db8::53' };
+
+    await controller.sync(args);
+    const callsAfterFirst = calls.length;
+
+    await controller.sync(args);
+    // Still retries in full — the v6 sub-step kept failing, so no signature was cached.
+    expect(calls.length).toBeGreaterThan(callsAfterFirst);
+
+    v6ShouldFail = false;
+    const callsAfterSecond = calls.length;
+    await controller.sync(args);
+    const callsAfterThird = calls.length;
+    expect(callsAfterThird).toBeGreaterThan(callsAfterSecond);
+
+    // Now that v6 succeeded, a fourth identical sync is fully skipped.
+    const callsAfterFourthAttemptStart = calls.length;
+    await controller.sync(args);
+    expect(calls.length).toBe(callsAfterFourthAttemptStart);
+  });
+});

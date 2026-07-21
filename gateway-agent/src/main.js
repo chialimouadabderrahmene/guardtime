@@ -1,7 +1,8 @@
 'use strict';
 
 const path = require('node:path');
-const { loadConfig } = require('./config');
+const { loadConfig, ENV_FILE } = require('./config');
+const { applyRotatedToken } = require('./token-rotation');
 const logger = require('./logger');
 const { BackendClient } = require('./backend-client');
 const { discoverDevices, resolvePolicyTarget } = require('./device-discovery');
@@ -52,6 +53,11 @@ async function syncOnce({ backend, firewall, connectionKiller, vpnDetector, dohD
   }
 
   const policies = await backend.getPolicies();
+
+  if (policies.rotatedToken) {
+    await applyRotatedToken({ backend, config, logger, envFilePath: ENV_FILE }, policies.rotatedToken);
+  }
+
   const allTargets = (policies.devices || []).map((policy) => resolvePolicyTarget(policy, enriched));
 
   // Never enforce ANY action (kill, block, throttle, VPN/QUIC/bandwidth
@@ -137,7 +143,7 @@ async function main() {
   const dnsSniff = new DnsSniffController(config, logger);
   const tlsFingerprint = new TlsFingerprintDetector(config, logger);
   const vpnDetector = new VpnDetector({ conntrack, dnsSniff, tlsFingerprint, metrics, logger });
-  const dohDetector = new DohDetector({ conntrack, metrics, logger });
+  const dohDetector = new DohDetector({ conntrack, dnsSniff, config, metrics, logger });
   const routerCommandExecutor = new RouterCommandExecutor({ backend, config, logger });
 
   logger.info('GuardTime gateway-agent starting', {

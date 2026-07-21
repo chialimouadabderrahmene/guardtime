@@ -3,6 +3,12 @@ import 'package:go_router/go_router.dart';
 
 import '../theme/app_colors.dart';
 
+/// The Meridian Dock — a floating glass pill detached from the screen
+/// edge, not a static full-width tab bar. Only the active destination
+/// expands into a labeled capsule with a live glow-dot; every other
+/// destination collapses to a quiet icon. Switching tabs morphs the
+/// capsule across via [AnimatedContainer]/[AnimatedSize] rather than a
+/// hard cut between static icons.
 class GuardTimeShellScaffold extends StatelessWidget {
   const GuardTimeShellScaffold({
     super.key,
@@ -39,32 +45,33 @@ class GuardTimeShellScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = context.scheme;
     final colors = context.colors;
     return Scaffold(
       extendBody: true,
       backgroundColor: Colors.transparent,
       body: child,
-      bottomNavigationBar: Container(
-        margin: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainer.withValues(alpha: 0.94),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: colors.glassBorder),
-          boxShadow: [
-            BoxShadow(
-              color: colors.ambientShadow,
-              blurRadius: 24,
-              offset: const Offset(0, -6),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            for (var index = 0; index < _items.length; index++)
-              Expanded(
-                child: _NavItem(
+      bottomNavigationBar: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+        child: Center(
+          child: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: colors.glassFill,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: colors.glassBorder),
+            boxShadow: [
+              BoxShadow(
+                color: colors.ambientShadow,
+                blurRadius: 28,
+                offset: const Offset(0, -6),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var index = 0; index < _items.length; index++)
+                _DockItem(
                   icon: _items[index].icon,
                   activeIcon: _items[index].activeIcon,
                   label: _items[index].label,
@@ -74,16 +81,17 @@ class GuardTimeShellScaffold extends StatelessWidget {
                     initialLocation: index == navigationShell.currentIndex,
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
+          ),
         ),
       ),
     );
   }
 }
 
-class _NavItem extends StatelessWidget {
-  const _NavItem({
+class _DockItem extends StatelessWidget {
+  const _DockItem({
     required this.icon,
     required this.activeIcon,
     required this.label,
@@ -100,51 +108,121 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = context.scheme;
-    final color = selected ? scheme.primary : scheme.onSurfaceVariant;
+    final colors = context.colors;
+    final foreground = selected ? scheme.onPrimary : scheme.onSurfaceVariant;
+
     return Semantics(
       button: true,
       selected: selected,
       label: label,
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(999),
         onTap: onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
+          duration: const Duration(milliseconds: 380),
+          curve: Curves.easeOutCubic,
+          padding: EdgeInsets.symmetric(
+            horizontal: selected ? 16 : 12,
+            vertical: 11,
+          ),
+          decoration: BoxDecoration(
+            color: selected ? scheme.primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: scheme.primary.withValues(alpha: 0.35),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                child: Icon(
-                  selected ? activeIcon : icon,
-                  key: ValueKey(selected),
-                  color: color,
-                  size: 22,
-                ),
+              AnimatedScale(
+                duration: const Duration(milliseconds: 380),
+                curve: Curves.easeOutCubic,
+                scale: selected ? 1.08 : 1.0,
+                child: Icon(selected ? activeIcon : icon, color: foreground, size: 20),
               ),
-              const SizedBox(height: 3),
-              Text(
-                label,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: color,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 2),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 250),
-                width: selected ? 16 : 0,
-                height: 3,
-                decoration: BoxDecoration(
-                  color: selected ? scheme.primary : Colors.transparent,
-                  borderRadius: BorderRadius.circular(999),
-                ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 380),
+                curve: Curves.easeOutCubic,
+                child: selected
+                    ? Padding(
+                        padding: const EdgeInsets.only(left: 7),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              label,
+                              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                color: foreground,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            _LiveDot(color: colors.glow),
+                          ],
+                        ),
+                      )
+                    : const SizedBox.shrink(),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The signature glow accent, reserved for "this is the active/live thing"
+/// — used here and nowhere else in the dock.
+class _LiveDot extends StatefulWidget {
+  const _LiveDot({required this.color});
+
+  final Color color;
+
+  @override
+  State<_LiveDot> createState() => _LiveDotState();
+}
+
+class _LiveDotState extends State<_LiveDot> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final t = _controller.value;
+        return Container(
+          width: 5,
+          height: 5,
+          decoration: BoxDecoration(
+            color: widget.color,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: widget.color.withValues(alpha: 0.55 * (1 - t)),
+                blurRadius: 5 * t,
+                spreadRadius: 3 * t,
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

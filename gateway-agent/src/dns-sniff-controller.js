@@ -48,11 +48,20 @@ class DnsSniffController {
     this.logger = logger;
   }
 
-  /** Layer 5 "DNS patterns": returns queried domain names, lowercased. Never throws. */
-  async captureDnsQueries(ipAddress) {
-    if (!this.config.enableVpnDnsSniff || !ipAddress) return [];
+  /**
+   * Layer 5 "DNS patterns": returns queried domain names, lowercased. Never
+   * throws. `options` lets a second caller (doh-detector.js) reuse this same
+   * sniff mechanism under its own enable flag/duration
+   * (config.enableDohDnsSniff/dohDnsSniffMs) without being tied to the VPN
+   * detector's flags — omit `options` entirely for the original VPN-detector
+   * behavior (falls back to config.enableVpnDnsSniff/vpnDnsSniffMs).
+   */
+  async captureDnsQueries(ipAddress, options = {}) {
+    const enabled = options.enabled ?? this.config.enableVpnDnsSniff;
+    const sniffMs = options.sniffMs ?? this.config.vpnDnsSniffMs;
+    if (!enabled || !ipAddress) return [];
 
-    const payload = JSON.stringify({ deviceIp: ipAddress, sniffMs: this.config.vpnDnsSniffMs });
+    const payload = JSON.stringify({ deviceIp: ipAddress, sniffMs });
 
     if (this.config.dryRun) {
       this.logger.info('[dry-run] python dns sniff', { ipAddress });
@@ -61,7 +70,7 @@ class DnsSniffController {
 
     try {
       const result = await execFileAsync(this.config.pythonBin, ['-c', SCAPY_DNS_SNIFF_PROGRAM, payload], {
-        timeout: Math.max(3000, this.config.vpnDnsSniffMs + 2500),
+        timeout: Math.max(3000, sniffMs + 2500),
       });
       const parsed = JSON.parse((result.stdout || '{}').trim() || '{}');
       if (!parsed.ok) {

@@ -83,4 +83,43 @@ describe('DnsSniffController.captureDnsQueries', () => {
     expect(result).toEqual([]);
     expect(logger.debug).toHaveBeenCalled();
   });
+
+  describe('options override (lets a second caller, e.g. doh-detector.js, reuse this sniff under its own flag/duration)', () => {
+    it('stays disabled when config.enableVpnDnsSniff is false but options.enabled is not passed', async () => {
+      const controller = new DnsSniffController({ enableVpnDnsSniff: false }, fakeLogger());
+      expect(await controller.captureDnsQueries('192.168.1.50', {})).toEqual([]);
+      expect(execFile).not.toHaveBeenCalled();
+    });
+
+    it('runs when options.enabled is true even though config.enableVpnDnsSniff is false', async () => {
+      mockExecFileStdout(JSON.stringify({ ok: true, queries: ['dns.google'] }));
+      const controller = new DnsSniffController(
+        { enableVpnDnsSniff: false, dryRun: false, pythonBin: 'python3' },
+        fakeLogger(),
+      );
+
+      const result = await controller.captureDnsQueries('192.168.1.50', { enabled: true, sniffMs: 700 });
+      expect(result).toEqual(['dns.google']);
+    });
+
+    it('stays disabled when options.enabled is explicitly false even though config.enableVpnDnsSniff is true', async () => {
+      const controller = new DnsSniffController({ enableVpnDnsSniff: true }, fakeLogger());
+      expect(await controller.captureDnsQueries('192.168.1.50', { enabled: false })).toEqual([]);
+      expect(execFile).not.toHaveBeenCalled();
+    });
+
+    it('uses options.sniffMs for the subprocess timeout instead of config.vpnDnsSniffMs', async () => {
+      mockExecFileStdout(JSON.stringify({ ok: true, queries: [] }));
+      const controller = new DnsSniffController(
+        { enableVpnDnsSniff: false, dryRun: false, pythonBin: 'python3', vpnDnsSniffMs: 500 },
+        fakeLogger(),
+      );
+
+      await controller.captureDnsQueries('192.168.1.50', { enabled: true, sniffMs: 700 });
+
+      const call = execFile.mock.calls[0];
+      const payload = JSON.parse(call[1][2]);
+      expect(payload.sniffMs).toBe(700);
+    });
+  });
 });

@@ -250,4 +250,32 @@ describe('FritzBoxPlugin', () => {
     expect(result.message).toMatch(/^\[dry-run\]/);
     expect(http.request).not.toHaveBeenCalled();
   });
+
+  it('logout reports no session to close — TR-064 Digest auth is stateless per-request', async () => {
+    const result = await FritzBoxPlugin.logout(baseCtx());
+    expect(result).toEqual({ success: true, message: expect.stringMatching(/no session/) });
+    expect(http.request).not.toHaveBeenCalled();
+  });
+
+  it('health probes tr64desc.xml without requiring valid credentials', async () => {
+    mockHttpRequest(() => ({ statusCode: 200, body: TR64_DESC_XML }));
+    const result = await FritzBoxPlugin.health(baseCtx());
+    expect(result.success).toBe(true);
+    expect(result.message).toMatch(/reachable/);
+    expect(result.detail).toMatch(/\d+ms/);
+  });
+
+  it('health reports failure when the device is unreachable', async () => {
+    http.request.mockImplementation(() => {
+      const req = new EventEmitter();
+      req.write = jest.fn();
+      req.setTimeout = jest.fn();
+      req.destroy = jest.fn();
+      req.end = jest.fn(() => setImmediate(() => req.emit('error', new Error('ECONNREFUSED'))));
+      return req;
+    });
+    const result = await FritzBoxPlugin.health(baseCtx());
+    expect(result.success).toBe(false);
+    expect(result.message).toMatch(/health check failed/);
+  });
 });

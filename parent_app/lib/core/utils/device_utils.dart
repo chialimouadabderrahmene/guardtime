@@ -34,7 +34,7 @@ IconData deviceIcon(String type) {
 
 Color deviceAccent(String type) {
   return switch (type) {
-    'PLAYSTATION' || 'NINTENDO' => AppPalette.amber300,
+    'PLAYSTATION' || 'NINTENDO' => AppPalette.brass300,
     'XBOX' => AppPalette.success,
     'SMART_TV' || 'STREAMING_BOX' => AppPalette.brand200,
     _ => AppPalette.brand400,

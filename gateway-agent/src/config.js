@@ -3,8 +3,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const ENV_FILE = path.join(__dirname, '..', '.env');
+
 function loadDotEnv() {
-  const file = path.join(__dirname, '..', '.env');
+  const file = ENV_FILE;
   if (!fs.existsSync(file)) return;
 
   const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
@@ -123,6 +125,25 @@ function loadConfig() {
     enableDohDnsSniff: bool('ENABLE_DOH_DNS_SNIFF', false),
     dohDnsSniffMs: int('DOH_DNS_SNIFF_MS', 500),
 
+    // Operator-configurable DoH reputation list — same honest-empty-default
+    // posture as tlsVpnJa3Hashes above: no hardcoded "known self-hosted DoH"
+    // IPs/domains beyond the publicly-documented major providers already in
+    // doh-dot-patterns.js, since there is no threat-intel feed available in
+    // this environment to populate one responsibly. An operator who has
+    // identified a specific self-hosted DoH endpoint (their own lab, a
+    // vetted blocklist they trust) can add it here without a code change;
+    // entries feed both detection (doh-detector.js) and the firewall block
+    // rule (ensureDohDotBlock/addDohDotBlockRules), same as the built-in
+    // provider list.
+    dohReputationIps: (process.env.DOH_REPUTATION_IPS || '')
+      .split(',')
+      .map((ip) => ip.trim())
+      .filter(Boolean),
+    dohReputationDomains: (process.env.DOH_REPUTATION_DOMAINS || '')
+      .split(',')
+      .map((domain) => domain.trim().toLowerCase())
+      .filter(Boolean),
+
     // Layer 7: bandwidth control.
     enableBandwidthControl: bool('ENABLE_BANDWIDTH_CONTROL', true),
     ipsetBin: process.env.IPSET_BIN || 'ipset',
@@ -164,4 +185,4 @@ function loadConfig() {
   return config;
 }
 
-module.exports = { loadConfig };
+module.exports = { loadConfig, ENV_FILE };

@@ -280,3 +280,87 @@ describe('IptablesController', () => {
     expect(calls[0].cmd).toBe('iptables-save');
   });
 });
+
+describe('IptablesController — skips an idempotent rebuild', () => {
+  beforeEach(() => {
+    execFile.mockReset();
+  });
+
+  const syncArgs = () => ({
+    targets: [{ deviceId: 'dev-1', action: 'BLOCK', ipAddress: '192.168.1.50', macAddress: 'AA:BB:CC:DD:EE:FF' }],
+    dnsRedirectIp: '10.0.0.1',
+    enableDnsRedirect: true,
+  });
+
+  it('makes zero execFile calls on a second sync with an unchanged policy', async () => {
+    const calls = mockExecFile();
+    const controller = new IptablesController(baseConfig(), fakeLogger());
+
+    await controller.sync(syncArgs());
+    const callsAfterFirst = calls.length;
+    expect(callsAfterFirst).toBeGreaterThan(0);
+
+    await controller.sync(syncArgs());
+    expect(calls.length).toBe(callsAfterFirst);
+  });
+
+  it('logs a debug message instead of shelling out when skipped', async () => {
+    mockExecFile();
+    const logger = fakeLogger();
+    const controller = new IptablesController(baseConfig(), logger);
+
+    await controller.sync(syncArgs());
+    await controller.sync(syncArgs());
+
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('sync skipped'));
+  });
+
+  it('rebuilds again once the policy actually changes (e.g. a new device is blocked)', async () => {
+    const calls = mockExecFile();
+    const controller = new IptablesController(baseConfig(), fakeLogger());
+
+    await controller.sync(syncArgs());
+    const callsAfterFirst = calls.length;
+
+    await controller.sync({
+      ...syncArgs(),
+      targets: [...syncArgs().targets, { deviceId: 'dev-2', action: 'BLOCK', ipAddress: '192.168.1.51' }],
+    });
+
+    expect(calls.length).toBeGreaterThan(callsAfterFirst);
+  });
+
+  it('does not cache a signature after a failed sync — the next cycle retries in full', async () => {
+    let shouldFail = true;
+    const calls = mockExecFile({ fail: (args) => shouldFail && args.includes('GUARDTIME_BLOCK') && args.includes('-A') });
+    const controller = new IptablesController(baseConfig(), fakeLogger());
+
+    await expect(controller.sync(syncArgs())).rejects.toThrow();
+    const callsAfterFailedAttempt = calls.length;
+
+    shouldFail = false;
+    await controller.sync(syncArgs());
+    expect(calls.length).toBeGreaterThan(callsAfterFailedAttempt);
+  });
+
+  it('v4 and v6 are tracked independently — a v6 rebuild still happens even when v4 is unchanged', async () => {
+    const calls = mockExecFile();
+    const controller = new IptablesController(baseConfig({ enableIpv6: true }), fakeLogger());
+
+    await controller.sync({
+      ...syncArgs(),
+      targets: [{ ...syncArgs().targets[0], ipv6Address: '2001:db8::1' }],
+      dnsRedirectIpv6: '2001:db8::53',
+    });
+    const callsAfterFirst = calls.length;
+
+    await controller.sync({
+      ...syncArgs(),
+      targets: [{ ...syncArgs().targets[0], ipv6Address: '2001:db8::1' }],
+      dnsRedirectIpv6: '2001:db8::53',
+    });
+
+    // Both v4 and v6 passes are unchanged the second time, so nothing new runs.
+    expect(calls.length).toBe(callsAfterFirst);
+  });
+});

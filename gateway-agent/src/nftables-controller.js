@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { VPN_PORT_SIGNATURES, VPN_IP_RANGES } = require('./vpn-patterns');
 const { DOH_PROVIDER_IPS, DOT_PORTS } = require('./doh-dot-patterns');
+const { buildFirewallSyncSignature } = require('./firewall-sync-signature');
 const execFileAsync = promisify(execFile);
 
 const TABLE = 'guardtime';
@@ -43,9 +44,26 @@ class NftablesController {
   constructor(config, logger) {
     this.config = config;
     this.logger = logger;
+    // Single family (`inet` spans v4+v6 in one pass), so unlike
+    // IptablesController this only ever needs one remembered signature.
+    this._lastSyncSignature = null;
   }
 
   async sync({ targets, dnsRedirectIp, dnsRedirectIpv6, enableDnsRedirect, enableQuicBlockGlobal, enableDohBlock }) {
+    const signature = buildFirewallSyncSignature({
+      targets,
+      dnsRedirectIp,
+      dnsRedirectIpv6,
+      enableDnsRedirect,
+      enableQuicBlockGlobal,
+      enableDohBlock,
+      enableIpv6: this.config.enableIpv6,
+    });
+    if (this._lastSyncSignature === signature) {
+      this.logger.debug('nftables sync skipped — policy unchanged since last cycle');
+      return;
+    }
+
     const snapshot = await this.snapshotRuleset();
     try {
       await this.ensureTable();
@@ -82,17 +100,30 @@ class NftablesController {
       throw err;
     }
 
+    // Only remembered as "applied" once the v6 DNS-redirect sub-step (if
+    // applicable) also succeeded — otherwise a signature-unchanged next
+    // cycle would skip the ENTIRE sync, including retrying that failed v6
+    // redirect, and it would never self-heal. `v6RedirectFailed` stays
+    // false (so the signature IS cached) whenever v6 is disabled or no v6
+    // resolver is configured, matching the pre-existing "just skip it, no
+    // error" behavior for those cases.
+    let v6RedirectFailed = false;
     if (this.config.enableIpv6) {
       const v6ResolverIp = dnsRedirectIpv6 || this.config.dnsRedirectIpv6;
       if (enableDnsRedirect && v6ResolverIp) {
         try {
           await this.ensureDnsRedirectV6(v6ResolverIp);
         } catch (err) {
+          v6RedirectFailed = true;
           this.logger.error('nftables v6 DNS redirect failed — IPv4 DNS redirect is unaffected', {
             error: err.message,
           });
         }
       }
+    }
+
+    if (!v6RedirectFailed) {
+      this._lastSyncSignature = signature;
     }
   }
 
@@ -255,7 +286,8 @@ class NftablesController {
       await this.run(['add', 'rule', 'inet', TABLE, FORWARD_CHAIN, 'tcp', 'dport', String(port), 'counter', 'drop', 'comment', '"guardtime-dot-tcp"']);
       await this.run(['add', 'rule', 'inet', TABLE, FORWARD_CHAIN, 'udp', 'dport', String(port), 'counter', 'drop', 'comment', '"guardtime-dot-udp"']);
     }
-    for (const provider of DOH_PROVIDER_IPS) {
+    const reputationProviders = (this.config.dohReputationIps || []).map((ip) => ({ ip, name: 'operator-reputation-list' }));
+    for (const provider of [...DOH_PROVIDER_IPS, ...reputationProviders]) {
       await this.run([
         'add', 'rule', 'inet', TABLE, FORWARD_CHAIN,
         'ip', 'daddr', provider.ip,

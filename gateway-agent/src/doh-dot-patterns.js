@@ -57,19 +57,32 @@ const DOH_SNI_PATTERNS = [
   'dns.adguard-dns.com',
 ];
 
-function matchDohSni(hostname) {
+/**
+ * `extraDomains` is the operator-configurable reputation list
+ * (config.dohReputationDomains, from DOH_REPUTATION_DOMAINS env) — checked
+ * with the same suffix-match rule as the built-in list, alongside it rather
+ * than instead of it, so an operator addition never disables the defaults.
+ */
+function matchDohSni(hostname, extraDomains = []) {
   if (!hostname) return null;
   const normalized = hostname.toLowerCase().replace(/\.$/, '');
-  for (const suffix of DOH_SNI_PATTERNS) {
+  for (const suffix of [...DOH_SNI_PATTERNS, ...extraDomains]) {
     if (normalized === suffix || normalized.endsWith(`.${suffix}`)) return suffix;
   }
   return null;
 }
 
-function matchDohIp(ipAddress) {
+/**
+ * `extraIps` is the operator-configurable reputation list
+ * (config.dohReputationIps, from DOH_REPUTATION_IPS env) — checked
+ * alongside the built-in provider list, tagged with a generic name since
+ * the operator supplied only an address, not a provider label.
+ */
+function matchDohIp(ipAddress, extraIps = []) {
   if (!ipAddress) return null;
   const hit = DOH_PROVIDER_IPS.find((provider) => provider.ip === ipAddress);
-  return hit ? hit.name : null;
+  if (hit) return hit.name;
+  return extraIps.includes(ipAddress) ? 'operator-reputation-list' : null;
 }
 
 module.exports = { DOT_PORTS, DOH_PROVIDER_IPS, DOH_SNI_PATTERNS, matchDohSni, matchDohIp };

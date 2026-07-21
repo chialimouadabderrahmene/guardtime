@@ -171,6 +171,25 @@ const FritzBoxPlugin = {
     return FritzBoxPlugin.testConnection(ctx);
   },
 
+  /** No documented TR-064 session-logout action — HTTP Digest auth is stateless per-request, so there is no server-side session to invalidate. */
+  async logout() {
+    return { success: true, message: 'TR-064 uses stateless per-request Digest auth — no session to log out of' };
+  },
+
+  /** Cheap, unauthenticated reachability probe (tr64desc.xml challenges but does not require valid credentials to reach) — distinct from the authenticated testConnection() above. */
+  async health(ctx) {
+    const startedAt = Date.now();
+    try {
+      const result = await httpRequest({ hostname: ctx.ipAddress, port: TR064_PORT, path: '/tr64desc.xml', method: 'GET' });
+      const latencyMs = Date.now() - startedAt;
+      return result.statusCode === 200 || result.statusCode === 401
+        ? { success: true, message: 'TR-064 endpoint reachable', detail: `${latencyMs}ms` }
+        : { success: false, message: `unexpected status ${result.statusCode}`, detail: `${latencyMs}ms` };
+    } catch (err) {
+      return { success: false, message: `health check failed: ${err.message}` };
+    }
+  },
+
   async testConnection(ctx) {
     try {
       const out = await soapAction(ctx, DEVICE_INFO_SERVICE, 'GetInfo');

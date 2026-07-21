@@ -60,6 +60,11 @@ const OUI_VENDORS = new Map([
   ['c0:56:27', 'Linksys'],
   ['14:d6:4d', 'D-Link'],
   ['90:94:e4', 'D-Link'],
+  ['00:1d:aa', 'DrayTek'],
+  ['00:11:32', 'Synology'],
+  ['00:16:01', 'Buffalo'],
+  ['00:e0:fc', 'Huawei'],
+  ['4c:1f:cc', 'Huawei'],
 ]);
 
 function lookupVendor(macAddress) {
