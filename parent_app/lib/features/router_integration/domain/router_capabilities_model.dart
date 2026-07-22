@@ -11,6 +11,7 @@ class RouterCapabilitiesModel {
     required this.supportsPauseDevice,
     required this.supportsClientDisconnect,
     required this.supportsQoS,
+    required this.supportsStatistics,
     required this.supportsParentalControl,
     required this.supportsACL,
     required this.supportsMACFiltering,
@@ -19,6 +20,7 @@ class RouterCapabilitiesModel {
     required this.supportsTR064,
     required this.supportsRouterOS,
     required this.supportedAuthentication,
+    this.modelFamily,
     this.protocol,
     this.officialDocUrl,
     this.scopeNote,
@@ -26,6 +28,7 @@ class RouterCapabilitiesModel {
 
   final String pluginId;
   final String vendorDisplayName;
+  final String? modelFamily;
   final String integrationStatus; // 'OFFICIAL_API' | 'GUIDE_ONLY'
   final bool pluginImplemented;
   final String? protocol;
@@ -36,6 +39,7 @@ class RouterCapabilitiesModel {
   final bool supportsPauseDevice;
   final bool supportsClientDisconnect;
   final bool supportsQoS;
+  final bool supportsStatistics;
   final bool supportsParentalControl;
   final bool supportsACL;
   final bool supportsMACFiltering;
@@ -58,6 +62,7 @@ class RouterCapabilitiesModel {
     CapabilityFlag('Pause Device', supportsPauseDevice),
     CapabilityFlag('Client Disconnect', supportsClientDisconnect),
     CapabilityFlag('QoS / Bandwidth', supportsQoS),
+    CapabilityFlag('Statistics', supportsStatistics),
     CapabilityFlag('Parental Control', supportsParentalControl),
     CapabilityFlag('ACL', supportsACL),
     CapabilityFlag('MAC Filtering', supportsMACFiltering),
@@ -67,6 +72,7 @@ class RouterCapabilitiesModel {
     return RouterCapabilitiesModel(
       pluginId: json['pluginId'] as String? ?? '',
       vendorDisplayName: json['vendorDisplayName'] as String? ?? 'Unknown vendor',
+      modelFamily: json['modelFamily'] as String?,
       integrationStatus: json['integrationStatus'] as String? ?? 'GUIDE_ONLY',
       pluginImplemented: json['pluginImplemented'] as bool? ?? false,
       protocol: json['protocol'] as String?,
@@ -77,6 +83,7 @@ class RouterCapabilitiesModel {
       supportsPauseDevice: json['supportsPauseDevice'] as bool? ?? false,
       supportsClientDisconnect: json['supportsClientDisconnect'] as bool? ?? false,
       supportsQoS: json['supportsQoS'] as bool? ?? false,
+      supportsStatistics: json['supportsStatistics'] as bool? ?? false,
       supportsParentalControl: json['supportsParentalControl'] as bool? ?? false,
       supportsACL: json['supportsACL'] as bool? ?? false,
       supportsMACFiltering: json['supportsMACFiltering'] as bool? ?? false,

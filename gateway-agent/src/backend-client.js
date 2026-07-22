@@ -1,6 +1,7 @@
 'use strict';
 
 const { createHmac, createHash } = require('node:crypto');
+const { version: AGENT_VERSION } = require('../package.json');
 
 class BackendClient {
   constructor({ backendUrl, gatewayToken }) {
@@ -86,6 +87,7 @@ class BackendClient {
           'x-gateway-token': this.gatewayToken,
           'x-gateway-timestamp': timestamp,
           'x-gateway-signature': signature,
+          'x-gateway-agent-version': AGENT_VERSION,
           ...(options.headers || {}),
         },
       });

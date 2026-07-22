@@ -17,6 +17,7 @@ import 'package:parent_app/core/widgets/loading_state_view.dart';
 import 'package:parent_app/core/widgets/section_header.dart';
 import 'package:parent_app/features/dashboard/domain/dashboard_bundle.dart';
 import 'package:parent_app/features/dashboard/presentation/providers/dashboard_provider.dart';
+import 'package:parent_app/features/dashboard/presentation/widgets/network_health_card.dart';
 import 'package:parent_app/features/devices/data/devices_repository.dart';
 import 'package:parent_app/features/devices/domain/device_health.dart';
 import 'package:parent_app/features/devices/presentation/providers/devices_providers.dart';
@@ -85,6 +86,7 @@ class DashboardScreen extends ConsumerWidget {
               ref.invalidate(dashboardProvider);
               ref.invalidate(devicesListProvider);
               ref.invalidate(deviceHealthSummaryProvider);
+              ref.invalidate(networkHealthProvider);
             },
             child: ListView(
               padding: const EdgeInsets.fromLTRB(
@@ -106,6 +108,8 @@ class DashboardScreen extends ConsumerWidget {
                   const SizedBox(height: AppSpacing.xl),
                 ],
                 _TodayStrip(bundle: bundle),
+                const SizedBox(height: AppSpacing.xl),
+                const NetworkHealthCard(),
                 const SizedBox(height: AppSpacing.lg),
                 _QuickActionsRow(
                   bundle: bundle,

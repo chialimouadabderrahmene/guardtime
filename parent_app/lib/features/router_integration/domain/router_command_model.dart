@@ -1,5 +1,7 @@
 import 'package:parent_app/core/utils/model_utils.dart';
 
+import 'router_capability_score_model.dart';
+
 class RouterCommandModel {
   const RouterCommandModel({
     required this.id,
@@ -37,20 +39,23 @@ class RouterCommandModel {
 }
 
 class RouterDiagnosticsModel {
-  const RouterDiagnosticsModel({required this.recentCommands, this.router});
+  const RouterDiagnosticsModel({required this.recentCommands, this.router, this.score});
 
   final Map<String, dynamic>? router;
   final List<RouterCommandModel> recentCommands;
+  final RouterCapabilityScoreModel? score;
 
   factory RouterDiagnosticsModel.fromJson(Map<String, dynamic> json) {
     final routerJson = json['router'];
     final commandsJson = json['recentCommands'] as List<dynamic>? ?? const [];
+    final scoreJson = json['score'];
     return RouterDiagnosticsModel(
       router: routerJson is Map<String, dynamic> ? routerJson : null,
       recentCommands: commandsJson
           .whereType<Map<String, dynamic>>()
           .map(RouterCommandModel.fromJson)
           .toList(),
+      score: scoreJson is Map<String, dynamic> ? RouterCapabilityScoreModel.fromJson(scoreJson) : null,
     );
   }
 }

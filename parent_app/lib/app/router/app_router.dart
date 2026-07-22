@@ -12,6 +12,7 @@ import 'package:parent_app/features/children/presentation/screens/add_child_scre
 import 'package:parent_app/features/children/presentation/screens/child_profile_screen.dart';
 import 'package:parent_app/features/children/presentation/screens/children_screen.dart';
 import 'package:parent_app/features/dashboard/presentation/screens/dashboard_screen.dart';
+import 'package:parent_app/features/dashboard/presentation/screens/network_health_screen.dart';
 import 'package:parent_app/features/devices/presentation/screens/add_device_screen.dart';
 import 'package:parent_app/features/devices/presentation/screens/device_details_screen.dart';
 import 'package:parent_app/features/devices/presentation/screens/devices_screen.dart';
@@ -22,6 +23,10 @@ import 'package:parent_app/features/devices/presentation/screens/platform_guide_
 import 'package:parent_app/features/devices/presentation/screens/platform_guides_screen.dart';
 import 'package:parent_app/features/devices/presentation/screens/protection_health_screen.dart';
 import 'package:parent_app/features/gaming/presentation/screens/full_internet_lock_screen.dart';
+import 'package:parent_app/features/gateways/domain/gateway_registration_result.dart';
+import 'package:parent_app/features/gateways/presentation/screens/add_gateway_screen.dart';
+import 'package:parent_app/features/gateways/presentation/screens/create_software_gateway_screen.dart';
+import 'package:parent_app/features/gateways/presentation/screens/gateway_created_screen.dart';
 import 'package:parent_app/features/notifications/presentation/screens/notifications_screen.dart';
 import 'package:parent_app/features/offline_control/presentation/screens/offline_checklist_screen.dart';
 import 'package:parent_app/features/offline_control/presentation/screens/offline_control_guide_screen.dart';
@@ -34,6 +39,7 @@ import 'package:parent_app/features/router_integration/presentation/screens/diag
 import 'package:parent_app/features/router_integration/presentation/screens/gaming_devices_screen.dart';
 import 'package:parent_app/features/router_integration/presentation/screens/instant_block_screen.dart';
 import 'package:parent_app/features/router_integration/presentation/screens/one_click_setup_screen.dart';
+import 'package:parent_app/features/router_integration/presentation/screens/router_compatibility_screen.dart';
 import 'package:parent_app/features/router_integration/presentation/screens/router_details_screen.dart';
 import 'package:parent_app/features/router_integration/presentation/screens/router_detection_screen.dart';
 import 'package:parent_app/features/router_integration/presentation/screens/router_wizard_screen.dart';
@@ -282,6 +288,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: '/network-health',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: const NetworkHealthScreen(),
+        ),
+      ),
+      GoRoute(
         path: '/protection-health',
         pageBuilder: (context, state) => _slideUpTransitionPage(
           key: state.pageKey,
@@ -371,10 +384,38 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: '/gateways/add',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: const AddGatewayScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/gateways/add/software',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: const CreateSoftwareGatewayScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '/gateways/created',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: GatewayCreatedScreen(result: state.extra as GatewayRegistrationResult),
+        ),
+      ),
+      GoRoute(
         path: '/routers/:gatewayId',
         pageBuilder: (context, state) => _slideUpTransitionPage(
           key: state.pageKey,
           child: RouterDetailsScreen(gatewayId: state.pathParameters['gatewayId']!),
+        ),
+      ),
+      GoRoute(
+        path: '/routers/:gatewayId/compatibility',
+        pageBuilder: (context, state) => _slideUpTransitionPage(
+          key: state.pageKey,
+          child: RouterCompatibilityScreen(gatewayId: state.pathParameters['gatewayId']!),
         ),
       ),
       GoRoute(

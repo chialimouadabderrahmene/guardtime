@@ -12,7 +12,12 @@ build/
 *.env
 .env.local
 .env.*.local
+# .env.prod (and any other .env.<name> variant) holds real production
+# secrets once filled in from .env.prod.example — never committed. The
+# `*.example` templates are the only `.env*` files meant to be tracked.
+.env.*
 !.env.example
+!.env.*.example
 
 # ─── Logs ─────────────────────────────────────────────────────────
 *.log
@@ -80,6 +85,20 @@ convert_to_pdf.py
 
 # ─── Docker ───────────────────────────────────────────────────────
 *.pid
+
+# ─── nginx: real certs / ACME challenge files never committed ──────
+nginx/certs/*
+!nginx/certs/README.md
+nginx/certbot-www/*
+!nginx/certbot-www/README.md
+
+# ─── Deployment runtime state / local backups (never committed) ───
+backups/
+deploy/.last-deployed-commit
+
+# ─── Real secret files (Firebase service account, etc.) ────────────
+secrets/*
+!secrets/README.md
 
 # ─── Nested .git folders (treat subfolders as regular directories) ─
 # Uncomment if you want to track dns-service and gateway-agent inline

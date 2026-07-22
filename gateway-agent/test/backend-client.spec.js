@@ -31,6 +31,13 @@ describe('BackendClient', () => {
     expect(calls[0].options.headers['x-gateway-token']).toBe('tok-123');
   });
 
+  it('sends this agent build\'s version header, matching package.json, on every request', async () => {
+    const { version } = require('../package.json');
+    const calls = mockFetch(() => ({ status: 200, body: {} }));
+    await client().getPolicies();
+    expect(calls[0].options.headers['x-gateway-agent-version']).toBe(version);
+  });
+
   it('throws with the backend error message on a non-ok response', async () => {
     mockFetch(() => ({ status: 401, body: { message: 'invalid token' } }));
     await expect(client().getPolicies()).rejects.toThrow(/invalid token/);

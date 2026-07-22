@@ -139,6 +139,11 @@ class _RouterDetailsScreenState extends ConsumerState<RouterDetailsScreen> {
               ActionGrid(
                 items: [
                   ActionGridItem(
+                    icon: Icons.workspace_premium_rounded,
+                    label: 'Compatibility',
+                    onTap: () => context.push('/routers/$gatewayId/compatibility'),
+                  ),
+                  ActionGridItem(
                     icon: Icons.checklist_rtl_rounded,
                     label: 'Supported Features',
                     onTap: () => context.push('/routers/$gatewayId/features'),

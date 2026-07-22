@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:parent_app/features/devices/data/devices_repository.dart';
 import 'package:parent_app/features/devices/domain/device_health.dart';
 import 'package:parent_app/features/devices/domain/device_model.dart';
+import 'package:parent_app/features/devices/domain/network_health.dart';
 import 'package:parent_app/features/devices/domain/network_status_model.dart';
 import 'package:parent_app/features/devices/domain/offline_control_status.dart';
 import 'package:parent_app/features/devices/domain/platform_models.dart';
@@ -41,6 +42,10 @@ final deviceHealthProvider = FutureProvider.family<DeviceHealth, String>((
   deviceId,
 ) async {
   return ref.read(devicesRepositoryProvider).fetchDeviceHealth(deviceId);
+});
+
+final networkHealthProvider = FutureProvider<NetworkHealthSummary>((ref) async {
+  return ref.read(devicesRepositoryProvider).fetchNetworkHealth();
 });
 
 final platformGuidesProvider = FutureProvider<List<PlatformGuide>>((ref) async {

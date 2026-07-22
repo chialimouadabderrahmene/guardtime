@@ -3,6 +3,7 @@ import 'package:parent_app/core/network/api_client.dart';
 
 import '../domain/device_health.dart';
 import '../domain/device_model.dart';
+import '../domain/network_health.dart';
 import '../domain/network_status_model.dart';
 import '../domain/offline_control_status.dart';
 import '../domain/platform_models.dart';
@@ -96,6 +97,11 @@ class DevicesRepository {
     final data =
         await _apiClient.get('/device-health') as Map<String, dynamic>;
     return DeviceHealthSummary.fromJson(data);
+  }
+
+  Future<NetworkHealthSummary> fetchNetworkHealth() async {
+    final data = await _apiClient.get('/device-health/network') as Map<String, dynamic>;
+    return NetworkHealthSummary.fromJson(data);
   }
 
   Future<DeviceHealth> fetchDeviceHealth(String deviceId) async {
